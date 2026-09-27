@@ -27,7 +27,7 @@ class BrandTests(unittest.TestCase):
         with patch.object(i18n, 'NAME', name), patch.object(tray_model, 'NAME', name):
             for language in ('en', 'nl', 'de', 'fr'):
                 translator = i18n.Translator(environ={'LANG': language})
-                for key in ('tray.open', 'devices.empty', 'status.close_hint'):
+                for key in ('devices.empty', 'status.close_hint'):
                     self.assertIn(name, translator(key))
                 self.assertTrue(tray_model.TrayState(locale=translator).title.startswith(name + ' · '))
                 self.assertEqual(translator.message('Unknown {raw}'), 'Unknown {raw}')

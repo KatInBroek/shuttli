@@ -8,7 +8,7 @@
   "nav.settings": "Paramètres",
   "action.send": "Envoyer maintenant",
   "action.refresh_discovery": "Rechercher les appareils",
-  "tray.open": "Ouvrir {app_name}",
+  "tray.open": "Ouvrir la fenêtre",
   "tray.enable_send": "Activer l’envoi",
   "tray.enable_receive": "Activer la réception",
   "tray.quit": "Quitter {app_name}",
@@ -144,9 +144,12 @@
   "ui.this_computer": "Cet ordinateur",
   "ui.start_login": "Démarrer à la connexion",
   "ui.limit_hint": "La limite compte les événements du presse-papiers, y compris les copies locales. Les envois automatiques partagent le même événement.",
-  "ui.allowed": "{mode} · Appareils autorisés : {count}",
   "ui.local_copy": "Copié sur cet appareil",
   "ui.not_sent": "Non envoyé",
   "direction.local": "Copie locale",
-  "notice.local_copy": "Copie locale du presse-papiers"
+  "notice.local_copy": "Copie locale du presse-papiers",
+  "status.discovered": "Appareils découverts",
+  "status.allowed_send": "↑ Envoi autorisé",
+  "status.allowed_receive": "↓ Réception autorisée",
+  "status.permissions_hint": "Les appareils hors ligne sont inclus. Une direction est autorisée uniquement si son interrupteur global et celui de l’appareil sont activés. Ces autorisations sont locales ; le transfert dépend aussi de l’autre appareil."
 }

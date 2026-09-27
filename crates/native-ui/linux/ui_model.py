@@ -30,8 +30,3 @@ def group_history(entries):
 
 def peer_name(peers, fingerprint):
     return next((p['name'] for p in peers if p['id'] == fingerprint), fingerprint[:12])
-
-
-def allowed_count(settings, peers):
-    return sum(bool(settings['peers'].get(p['id'], DEFAULT_POLICY).get('send'))
-               for p in peers)

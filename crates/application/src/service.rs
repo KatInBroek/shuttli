@@ -539,6 +539,15 @@ impl Service {
         match action {
             Action::Status => {
                 let s = self.state.borrow();
+                let mut devices = DeviceCounts {
+                    discovered: s.peers.len(),
+                    ..DeviceCounts::default()
+                };
+                for peer in &s.peers {
+                    let policy = s.settings.peers.get(&peer.id).cloned().unwrap_or_default();
+                    devices.send += usize::from(s.settings.send && policy.send);
+                    devices.receive += usize::from(s.settings.receive && policy.receive);
+                }
                 return Ok(Answer::Status {
                     status: Status {
                         device: self.device.clone(),
@@ -548,6 +557,7 @@ impl Service {
                         settings: s.settings.clone(),
                         policy_revision: s.core.revision(),
                         sequence: s.sequence,
+                        devices,
                     },
                 });
             }

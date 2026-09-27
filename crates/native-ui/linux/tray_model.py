@@ -16,24 +16,27 @@ class TrayState:
     receive: bool = False
     available: bool = False
     locale: object = field(default=None, compare=False, repr=False)
+    send_count: int = 0
+    receive_count: int = 0
 
     @classmethod
     def from_answer(cls, answer, locale=None):
         if answer.get('type') != 'status':
             return cls(locale=locale)
         settings = answer['status']['settings']
-        return cls(settings['send'], settings['receive'], True, locale)
+        counts = answer['status'].get('devices', {})
+        return cls(settings['send'], settings['receive'], True, locale,
+                   counts.get('send', 0) if settings['send'] else 0,
+                   counts.get('receive', 0) if settings['receive'] else 0)
 
     def text(self, key):
         return (self.locale or ENGLISH)(key)
 
     @property
     def title(self):
-        key = 'tray.connecting' if not self.available else {
-            (True, True): 'tray.both', (True, False): 'tray.send_only',
-            (False, True): 'tray.receive_only', (False, False): 'tray.paused',
-        }[(self.send, self.receive)]
-        return NAME + ' · ' + self.text(key)
+        if not self.available:
+            return NAME + ' · ' + self.text('tray.connecting')
+        return NAME + ' · ↑ ' + str(self.send_count) + ' · ↓ ' + str(self.receive_count)
 
     def menu(self):
         return [

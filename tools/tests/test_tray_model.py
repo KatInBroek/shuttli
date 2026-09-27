@@ -9,6 +9,17 @@ from tray_model import TrayState, icon_pixels
 
 
 class TrayModelTests(unittest.TestCase):
+    def test_device_counts_refresh_title_and_respect_global_switches(self):
+        def state(send, receive, outgoing=2):
+            return TrayState.from_answer({'type': 'status', 'status': {
+                'settings': {'send': send, 'receive': receive},
+                'devices': {'discovered': 3, 'send': outgoing, 'receive': 3}}})
+        for send, receive in itertools.product((False, True), repeat=2):
+            result = state(send, receive)
+            self.assertTrue(result.title.endswith(f'↑ {2 if send else 0} · ↓ {3 if receive else 0}'))
+            self.assertEqual(result.menu()[1][1], 'Open window')
+        self.assertNotEqual(state(True, True), state(True, True, 1))
+
     def test_all_directions_have_distinct_icons_and_consistent_controls(self):
         states = [TrayState(send, receive, True) for send, receive in itertools.product((False, True), repeat=2)]
         for size in (16, 24, 32):

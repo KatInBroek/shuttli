@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 import sys
 from i18n import Translator, LANGUAGES
-from ui_model import DEFAULT_POLICY, group_history, peer_name, allowed_count
+from ui_model import DEFAULT_POLICY, group_history, peer_name
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, Gdk, GLib, Pango
@@ -40,6 +40,7 @@ class Window(Gtk.ApplicationWindow):
         self.service_available = None
         self.last_sequence = None
         self.last_policy_revision = None
+        self.last_device_counts = None
         self.closed = False
         self.connect('close-request', self.closing)
         css = Gtk.CssProvider()
@@ -248,13 +249,15 @@ class Window(Gtk.ApplicationWindow):
                 self.update_summary()
                 revision_changed = self.last_policy_revision is not None and self.last_policy_revision != status['policy_revision']
                 sequence_changed = self.last_sequence is not None and self.last_sequence != status['sequence']
+                counts_changed = self.last_device_counts != status.get('devices')
+                self.last_device_counts = status.get('devices')
                 self.last_sequence = status['sequence']
                 self.last_policy_revision = status['policy_revision']
                 for key, (widget, handler) in self.setting_toggles.items():
                     widget.handler_block(handler)
                     widget.set_active(self.settings[key])
                     widget.handler_unblock(handler)
-                if (revision_changed and self.page in ('status', 'devices', 'device')) or (sequence_changed and self.page in ('history', 'detail', 'status')):
+                if (revision_changed and self.page in ('status', 'devices', 'device')) or (sequence_changed and self.page in ('history', 'detail', 'status')) or (counts_changed and self.page == 'status'):
                     self.navigate(self.page)
             self.call({'command': 'status'}, updated, quiet=True, guarded=False)
         return True
@@ -328,7 +331,18 @@ class Window(Gtk.ApplicationWindow):
             hero.append(headings)
             state = {(True, True): 'tray.both', (True, False): 'tray.send_only', (False, True): 'tray.receive_only', (False, False): 'tray.paused'}[(self.settings['send'], self.settings['receive'])]
             self.label(headings, self.t(state), 'hero-title')
-            subtitle = self.label(headings, self.t('ui.automatic' if self.settings['automatic'] else 'ui.manual'), 'muted')
+            self.label(headings, self.t('ui.automatic' if self.settings['automatic'] else 'ui.manual'), 'muted')
+            counts = status.get('devices', {})
+            group = self.group(self.t('nav.devices'))
+            statistics = Gtk.Box(spacing=18, homogeneous=True)
+            statistics.add_css_class('row')
+            group.append(statistics)
+            for key, label in [('discovered', 'status.discovered'), ('send', 'status.allowed_send'), ('receive', 'status.allowed_receive')]:
+                metric = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+                statistics.append(metric)
+                self.label(metric, self.t(label), 'muted')
+                self.label(metric, str(counts.get(key, 0)), 'hero-title')
+            self.label(self.content, self.t('status.permissions_hint'), 'muted')
             group = self.group(self.t('ui.directions'))
             self.toggle(group, 'send', self.t('ui.send_hint'))
             self.toggle(group, 'receive', self.t('ui.receive_hint'))
@@ -336,7 +350,7 @@ class Window(Gtk.ApplicationWindow):
             self.toggle(group, 'automatic', self.t('ui.automatic_hint'))
             button = Gtk.Button(label=self.t('action.send'))
             button.add_css_class('suggested-action')
-            button.set_sensitive(self.settings['send'] and status['clipboard_available'])
+            button.set_sensitive(status['clipboard_available'] and counts.get('send', 0) > 0)
             button.connect('clicked', lambda *_: self.send_now(button))
             self.row(group, self.t('tray.send'), self.t('ui.manual_hint'), button)
             activity = Gtk.Box()
@@ -354,9 +368,6 @@ class Window(Gtk.ApplicationWindow):
             def peers_ready(a):
                 if a['type'] == 'devices':
                     self.peers = a['devices']
-                    count = allowed_count(self.settings, self.peers)
-                    subtitle.set_text(self.t('ui.allowed', count=count, mode=self.t('ui.automatic' if self.settings['automatic'] else 'ui.manual')))
-                    button.set_sensitive(self.settings['send'] and status['clipboard_available'] and count > 0)
                 self.call({'command': '_history'}, history_ready, quiet=True)
             self.call({'command': 'devices'}, peers_ready, quiet=True)
             details = Gtk.Expander(label=self.t('status.details'))

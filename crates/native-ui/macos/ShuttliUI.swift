@@ -14,6 +14,7 @@ final class Model: ObservableObject {
     @Published var fingerprint = ""
     @Published var clipboard = ""
     @Published var settings: [String: Any] = [:]
+    @Published var deviceCounts: [String: Int] = [:]
     @Published var peers: [Peer] = []
     @Published var entries: [Entry] = []
     @Published var offset = 0
@@ -23,6 +24,13 @@ final class Model: ObservableObject {
     private var pending = 0
     let executable: String
     init(_ executable: String) { self.executable = executable }
+    func applyStatus(_ answer: [String: Any]) {
+        guard let status = answer["status"] as? [String: Any] else { return }
+        fingerprint = status["device"] as? String ?? ""
+        clipboard = status["clipboard"] as? String ?? ""
+        settings = status["settings"] as? [String: Any] ?? [:]
+        deviceCounts = status["devices"] as? [String: Int] ?? [:]
+    }
     func call(_ args: [String], silent: Bool = false, complete: (([String: Any]) -> Void)? = nil) {
         if silent && pending > 0 { return }
         if pending >= 8 { message = "Please wait for the current operation"; return }
@@ -50,10 +58,8 @@ final class Model: ObservableObject {
     }
     func refresh() {
         call(["status"]) { a in
+            self.applyStatus(a)
             let s = a["status"] as? [String: Any] ?? [:]
-            self.fingerprint = s["device"] as? String ?? ""
-            self.clipboard = s["clipboard"] as? String ?? ""
-            self.settings = s["settings"] as? [String: Any] ?? [:]
             if let error = s["last_error"] as? String { self.message = error }
         }
         call(["devices"]) { a in
@@ -90,6 +96,14 @@ struct Content: View {
             Picker("Page", selection: $tab) { Text("Status").tag(0); Text("Devices").tag(1); Text("History").tag(2); Text("Settings").tag(3) }.pickerStyle(.segmented)
             ScrollView { VStack(alignment: .leading, spacing: 16) {
                 if tab == 0 {
+                    Text("Devices").font(.headline)
+                    Text("Discovered devices: \(model.deviceCounts["discovered"] ?? 0)")
+                    Text("↑ Allowed to send: \(model.deviceCounts["send"] ?? 0) · ↓ Allowed to receive: \(model.deviceCounts["receive"] ?? 0)")
+                    Text("Counts include offline devices. Both the global and device switches must be on. These are local permissions; delivery also depends on the other device.").foregroundStyle(.secondary)
+                    Text("Directions").font(.headline)
+                    ForEach(["send", "receive"], id: \.self) { key in
+                        Toggle(key.capitalized, isOn: Binding(get: { model.settings[key] as? Bool ?? false }, set: { on in model.call(["set", key, on ? "on" : "off"]) { _ in model.refresh() } }))
+                    }
                     Text("Device fingerprint").font(.headline)
                     Text(model.fingerprint).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                     Text(model.clipboard)
@@ -147,7 +161,9 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: ProductBrand.name)
         let menu = NSMenu()
-        menu.addItem(withTitle: "Open " + ProductBrand.name, action: #selector(show), keyEquivalent: "")
+        let summary = NSMenuItem(title: ProductBrand.name, action: nil, keyEquivalent: "")
+        menu.addItem(summary)
+        menu.addItem(withTitle: "Open window", action: #selector(show), keyEquivalent: "")
         menu.addItem(withTitle: "Send clipboard now", action: #selector(send), keyEquivalent: "")
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "Quit " + ProductBrand.name, action: #selector(quit), keyEquivalent: "")
@@ -155,8 +171,11 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         item.menu = menu
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            self.model.call(["status"], silent: true) { [weak self] _ in
-                if let self = self, self.window?.isVisible == true { self.model.history(silent: true) }
+            self.model.call(["status"], silent: true) { [weak self] answer in
+                guard let self = self else { return }
+                self.model.applyStatus(answer)
+                summary.title = ProductBrand.name + " · ↑ \(self.model.deviceCounts["send"] ?? 0) · ↓ \(self.model.deviceCounts["receive"] ?? 0)"
+                if self.window?.isVisible == true { self.model.history(silent: true) }
             }
         }
         if !CommandLine.arguments.contains("--background") { show() }

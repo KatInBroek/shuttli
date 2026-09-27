@@ -61,6 +61,15 @@ pub struct Status {
     pub settings: Settings,
     pub policy_revision: u64,
     pub sequence: u64,
+    /// Local direction permissions among discovered devices, including offline peers.
+    #[serde(default)]
+    pub devices: DeviceCounts,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceCounts {
+    pub discovered: usize,
+    pub send: usize,
+    pub receive: usize,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]

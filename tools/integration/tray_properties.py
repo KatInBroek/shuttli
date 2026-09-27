@@ -34,6 +34,7 @@ def wait(predicate, timeout=8):
 
 def main():
     state = dict(send=True, receive=True)
+    allowed_send = 2
     available = True
     quit_requested = threading.Event()
 
@@ -42,7 +43,7 @@ def main():
             action = json.loads(self.rfile.read())['action']
             if action['command'] == 'set_directions':
                 state.update({k: v for k, v in action.items() if k != 'command'})
-            answer = dict(type='status', status=dict(settings=state.copy())) if available else dict(type='error')
+            answer = dict(type='status', status=dict(settings=state.copy(), devices=dict(discovered=3, send=allowed_send if state['send'] else 0, receive=3 if state['receive'] else 0))) if available else dict(type='error')
             if action['command'] == 'quit':
                 quit_requested.set()
                 answer = {'type': 'done', 'message': 'Agent is stopping'}
@@ -105,7 +106,12 @@ def main():
                 state.update(send=send, receive=receive)
                 wait(lambda: (cache[20]['toggle-state'], cache[21]['toggle-state']) == (int(send), int(receive)))
                 assert cache[30]['enabled'] == send
+                assert cache[1]['label'].endswith(f'↑ {allowed_send if send else 0} · ↓ {3 if receive else 0}')
             print('PASS open panel receives all direction changes without refetching values', flush=True)
+
+            allowed_send = 1
+            wait(lambda: cache[1]['label'].endswith('↑ 1 · ↓ 3'))
+            print('PASS device permission counts update cached title without a global switch change', flush=True)
 
             active = False
             dirty = False

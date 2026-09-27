@@ -47,7 +47,8 @@ def main():
                 for n in nodes:
                     select(n,code)
                     wait(lambda:rpc(n,"print(json.dumps(call('/Menu','com.canonical.dbusmenu','GetProperty','(is)',(10,'label'))[0]))")==catalog['tray.open'])
-                    assert rpc(n,"print(json.dumps(prop('Title')))")=='Shuttli · '+catalog['tray.both']
+                    counts = n.api('status')['status']['devices']
+                    assert rpc(n,"print(json.dumps(prop('Title')))")==f"Shuttli · ↑ {counts['send']} · ↓ {counts['receive']}"
                     current=n.api('status')['status']
                     assert current['settings']==policy[n.label]['settings']
                     assert current['policy_revision']==policy[n.label]['policy_revision']

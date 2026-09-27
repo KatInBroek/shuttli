@@ -698,6 +698,56 @@ fn old_api_version_is_rejected_and_autostart_is_typed() {
 }
 
 #[test]
+fn status_counts_discovered_permissions_with_both_global_gates() {
+    let h = Harness::new();
+    let settings = Settings::default();
+    assert!(settings.send && settings.receive && settings.automatic);
+    assert!(matches!(h.configure(settings), Answer::Settings { .. }));
+    let Answer::Status { status } = h.command(Action::Status) else {
+        panic!()
+    };
+    assert_eq!(
+        status.devices,
+        DeviceCounts {
+            discovered: 2,
+            send: 0,
+            receive: 2
+        }
+    );
+    let mut settings = h.settings();
+    let policy = PeerPolicy {
+        send: true,
+        receive: false,
+        ..PeerPolicy::default()
+    };
+    settings.peers.insert("02".repeat(32), policy.clone());
+    settings.peers.insert("04".repeat(32), policy);
+    assert!(matches!(h.configure(settings), Answer::Settings { .. }));
+    for send in [false, true] {
+        for receive in [false, true] {
+            assert!(matches!(
+                h.command(Action::SetDirections {
+                    send: Some(send),
+                    receive: Some(receive)
+                }),
+                Answer::Settings { .. }
+            ));
+            let Answer::Status { status } = h.command(Action::Status) else {
+                panic!()
+            };
+            assert_eq!(
+                status.devices,
+                DeviceCounts {
+                    discovered: 2,
+                    send: usize::from(send),
+                    receive: usize::from(receive)
+                }
+            );
+        }
+    }
+}
+
+#[test]
 fn quit_revokes_pending_work_and_rejects_new_operations() {
     let h = Harness::new();
     let revision = h.network.lock().unwrap().revision;

@@ -51,7 +51,7 @@ class Fixture(ui.Window):
             if self.unavailable:
                 return {'type': 'error', 'message': 'fixture service unavailable'}
             return {'type': 'status', 'status': dict(device='01'*32, clipboard='Synthetic clipboard', clipboard_available=True,
-                    settings=copy.deepcopy(self.fixture_settings), sequence=self.seq, policy_revision=self.revision, last_error=None)}
+                    settings=copy.deepcopy(self.fixture_settings), devices=self.fixture_counts.copy(), sequence=self.seq, policy_revision=self.revision, last_error=None)}
         if command in ('settings', 'configure', 'set_directions'):
             if command == 'configure':
                 if action['expected'] != self.fixture_settings:
@@ -94,6 +94,7 @@ def run():
         window.actions = []
         window.unavailable = False
         window.seq = window.revision = 1
+        window.fixture_counts = dict(discovered=2, send=0, receive=2)
         window.fixture_settings = dict(version=1, send=True, receive=True, automatic=False, text=True, png=True,
                 notifications=True, history='content', history_limit=20, history_days=7,
                 history_bytes=134217728, history_memory_bytes=16777216, peers={})
@@ -118,6 +119,31 @@ def run():
             pump(timeout=.25)
             ImageGrab.grab(bbox=(0, 0, window.get_width(), window.get_height()), xdisplay=os.environ['DISPLAY']).save(report/(name+'.png'))
         wait_for(lambda: window.t('ui.manual') in labels())
+        wait_for(lambda: window.t('status.allowed_send') in labels())
+        def statistics():
+            result = {}
+            for widget in descendants(window.content):
+                if isinstance(widget, Gtk.Label) and widget.get_text() in [window.t(k) for k in ('status.discovered', 'status.allowed_send', 'status.allowed_receive')]:
+                    parent = widget.get_parent()
+                    result[widget.get_text()] = [w.get_text() for w in descendants(parent) if isinstance(w, Gtk.Label)]
+            return result
+        assert '0' in statistics()[window.t('status.allowed_send')]
+        assert '2' in statistics()[window.t('status.allowed_receive')]
+        assert labels().index(window.t('status.discovered')) < labels().index(window.t('ui.directions'))
+        window.fixture_counts = dict(discovered=3, send=1, receive=3)
+        window.poll()
+        wait_for(lambda: '1' in statistics().get(window.t('status.allowed_send'), []))
+        window.fixture_settings['send'] = False
+        window.fixture_counts['send'] = 0
+        window.revision += 1
+        window.poll()
+        wait_for(lambda: '0' in statistics().get(window.t('status.allowed_send'), []))
+        window.fixture_settings['send'] = True
+        window.fixture_counts = dict(discovered=2, send=0, receive=2)
+        window.revision += 1
+        window.poll()
+        wait_for(lambda: '2' in statistics().get(window.t('status.discovered'), []))
+        results.append('device statistics precede directions and refresh for discovery and global permission changes')
         screenshot('status-light')
         results.append('status shows manual mode independently from send permission')
         # Navigate using real sidebar buttons, then open device through row click.

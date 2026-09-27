@@ -70,7 +70,7 @@ class I18nTests(unittest.TestCase):
         t=Translator(environ={'LANG':'de'})
         self.assertEqual(t('status.directions',send='A',receive='B'),'Senden: A · Empfangen: B')
         del t.catalogs['de']['tray.open']
-        self.assertEqual(t('tray.open'),'Open ' + __import__('brand').NAME)
+        self.assertEqual(t('tray.open'),'Open window')
         self.assertEqual(t('future.key'),'future.key')
         self.assertEqual(t.message('TLS {raw}'),'TLS {raw}')
         self.assertEqual(t.message('Queued for 2 allowed device(s)'),t.plural('result.queued',2))

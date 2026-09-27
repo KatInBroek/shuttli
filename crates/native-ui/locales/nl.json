@@ -8,7 +8,7 @@
   "nav.settings": "Instellingen",
   "action.send": "Nu verzenden",
   "action.refresh_discovery": "Apparaten opnieuw zoeken",
-  "tray.open": "{app_name} openen",
+  "tray.open": "Venster openen",
   "tray.enable_send": "Verzenden inschakelen",
   "tray.enable_receive": "Ontvangen inschakelen",
   "tray.quit": "{app_name} afsluiten",
@@ -144,9 +144,12 @@
   "ui.this_computer": "Deze computer",
   "ui.start_login": "Starten bij aanmelden",
   "ui.limit_hint": "De limiet telt klembordgebeurtenissen, inclusief lokale kopieën. Automatische overdrachten horen bij dezelfde gebeurtenis.",
-  "ui.allowed": "{mode} · Toegestane apparaten: {count}",
   "ui.local_copy": "Gekopieerd op dit apparaat",
   "ui.not_sent": "Niet verzonden",
   "direction.local": "Lokale kopie",
-  "notice.local_copy": "Lokale klembordkopie"
+  "notice.local_copy": "Lokale klembordkopie",
+  "status.discovered": "Ontdekte apparaten",
+  "status.allowed_send": "↑ Verzenden toegestaan",
+  "status.allowed_receive": "↓ Ontvangen toegestaan",
+  "status.permissions_hint": "Offline apparaten tellen mee. Een richting is alleen toegestaan als zowel de algemene schakelaar als de apparaatschakelaar aan staat. Dit zijn lokale rechten; overdracht hangt ook af van het andere apparaat."
 }

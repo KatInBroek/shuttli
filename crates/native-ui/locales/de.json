@@ -8,7 +8,7 @@
   "nav.settings": "Einstellungen",
   "action.send": "Jetzt senden",
   "action.refresh_discovery": "Geräte erneut suchen",
-  "tray.open": "{app_name} öffnen",
+  "tray.open": "Fenster öffnen",
   "tray.enable_send": "Senden aktivieren",
   "tray.enable_receive": "Empfangen aktivieren",
   "tray.quit": "{app_name} beenden",
@@ -144,9 +144,12 @@
   "ui.this_computer": "Dieser Computer",
   "ui.start_login": "Bei Anmeldung starten",
   "ui.limit_hint": "Das Limit zählt Zwischenablageereignisse einschließlich lokaler Kopien. Automatische Übertragungen gehören zum selben Ereignis.",
-  "ui.allowed": "{mode} · Erlaubte Geräte: {count}",
   "ui.local_copy": "Auf diesem Gerät kopiert",
   "ui.not_sent": "Nicht gesendet",
   "direction.local": "Lokale Kopie",
-  "notice.local_copy": "Lokale Zwischenablagekopie"
+  "notice.local_copy": "Lokale Zwischenablagekopie",
+  "status.discovered": "Entdeckte Geräte",
+  "status.allowed_send": "↑ Senden erlaubt",
+  "status.allowed_receive": "↓ Empfangen erlaubt",
+  "status.permissions_hint": "Offline-Geräte zählen mit. Eine Richtung ist nur erlaubt, wenn sowohl der globale als auch der Geräteschalter eingeschaltet ist. Dies sind lokale Berechtigungen; die Übertragung hängt auch vom anderen Gerät ab."
 }
