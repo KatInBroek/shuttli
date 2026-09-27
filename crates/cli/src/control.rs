@@ -33,7 +33,7 @@ pub fn run(args: &[String], api: &mut impl ControlApi) -> Output {
         version: VERSION,
         action,
     });
-    let exit_code = if matches!(answer, Answer::Error { .. }) {
+    let exit_code = if matches!(answer, Answer::Error { .. } | Answer::Stopped) {
         1
     } else {
         0
@@ -42,6 +42,8 @@ pub fn run(args: &[String], api: &mut impl ControlApi) -> Output {
         serde_json::to_string(&answer).unwrap_or_default()
     } else {
         match &answer {
+            Answer::Stopped => "Agent has stopped; start `shuttli daemon` or `shuttli ui`".into(),
+            Answer::Autostart { status } => status.message.clone(),
             Answer::Done { message } | Answer::Error { message } => message.clone(),
             Answer::Status { status } => format!(
                 "Device: {}\nClipboard: {} ({})\nSend: {} | Receive: {} | Automatic: {}\nLast error: {}",
@@ -62,8 +64,8 @@ pub fn run(args: &[String], api: &mut impl ControlApi) -> Output {
                 .map(|p| {
                     let policy = settings.peers.get(&p.id).cloned().unwrap_or_default();
                     format!(
-                        "{}\n  {} {} | send={} receive={} blocked={}",
-                        p.id, p.name, p.address, policy.send, policy.receive, policy.blocked
+                        "{}\n  {} {} | send={} receive={}",
+                        p.id, p.name, p.address, policy.send, policy.receive
                     )
                 })
                 .collect::<Vec<_>>()
@@ -123,6 +125,7 @@ fn parse(a: &[&str], api: &mut impl ControlApi) -> Result<Option<Action>, String
     Ok(Some(match a {
         [] | ["help"] | ["--help"] | ["-h"] => return Ok(None),
         ["status"] => Action::Status,
+        ["quit"] => Action::Quit,
         ["devices"] => Action::Devices,
         ["settings"] => Action::Settings,
         ["refresh"] => Action::Refresh,
@@ -164,6 +167,7 @@ fn parse(a: &[&str], api: &mut impl ControlApi) -> Result<Option<Action>, String
             value,
         ] => {
             let mut s = settings(api)?;
+            let expected = s.clone();
             let n: u64 = value
                 .parse()
                 .map_err(|_| "expected a nonnegative integer")?;
@@ -185,20 +189,28 @@ fn parse(a: &[&str], api: &mut impl ControlApi) -> Result<Option<Action>, String
                     "history limit must be 0–10000; memory 0–64 MiB; images 0–1024 MiB".into(),
                 );
             }
-            Action::Configure { settings: s }
+            Action::Configure {
+                expected,
+                settings: s,
+            }
         }
         ["set", "history", mode] => {
             let mut s = settings(api)?;
+            let expected = s.clone();
             s.history = match *mode {
                 "off" => HistoryMode::Off,
                 "status" => HistoryMode::Status,
                 "content" => HistoryMode::Content,
                 _ => return Err("expected off, status or content".into()),
             };
-            Action::Configure { settings: s }
+            Action::Configure {
+                expected,
+                settings: s,
+            }
         }
         ["set", key, value] => {
             let mut s = settings(api)?;
+            let expected = s.clone();
             let v = switch(value)?;
             match *key {
                 "send" => s.send = v,
@@ -209,11 +221,15 @@ fn parse(a: &[&str], api: &mut impl ControlApi) -> Result<Option<Action>, String
                 "notifications" => s.notifications = v,
                 _ => return Err("unknown setting".into()),
             }
-            Action::Configure { settings: s }
+            Action::Configure {
+                expected,
+                settings: s,
+            }
         }
         ["peer", id, "history", mode] => {
             let s = settings(api)?;
             let mut p = s.peers.get(*id).cloned().unwrap_or_default();
+            let expected = p.clone();
             p.history = match *mode {
                 "inherit" => None,
                 "off" => Some(HistoryMode::Off),
@@ -223,6 +239,7 @@ fn parse(a: &[&str], api: &mut impl ControlApi) -> Result<Option<Action>, String
             };
             Action::Peer {
                 id: (*id).into(),
+                expected,
                 policy: p,
             }
         }
@@ -233,11 +250,11 @@ fn parse(a: &[&str], api: &mut impl ControlApi) -> Result<Option<Action>, String
                 .get(*id)
                 .cloned()
                 .unwrap_or_else(PeerPolicy::default);
+            let expected = p.clone();
             let v = switch(value)?;
             match *key {
                 "send" => p.send = v,
                 "receive" => p.receive = v,
-                "blocked" => p.blocked = v,
                 "text" => p.text = v,
                 "images" | "png" => p.png = v,
                 "quiet" => p.quiet = v,
@@ -245,6 +262,7 @@ fn parse(a: &[&str], api: &mut impl ControlApi) -> Result<Option<Action>, String
             }
             Action::Peer {
                 id: (*id).into(),
+                expected,
                 policy: p,
             }
         }
@@ -266,7 +284,7 @@ fn parse(a: &[&str], api: &mut impl ControlApi) -> Result<Option<Action>, String
         _ => return Err("Unsupported command; use --help".into()),
     }))
 }
-pub const HELP: &str = "Usage: shuttli daemon | ui | status | devices | refresh | send\n  settings | set <send|receive|automatic|text|images|notifications> <on|off>\n  set history <off|status|content>\n  set history-limit <0..10000>\n  set history-memory-mib <0..64> | set history-image-mib <0..1024>\n  peer <full fingerprint> <send|receive|blocked|text|images|quiet> <on|off>\n  history [preview|copy|resend <id>] | history clear\n  history copy <id> --local-only\n  autostart <status|on|off>\nAppend --json for the versioned local API response.\n";
+pub const HELP: &str = "Usage: shuttli daemon | ui | status | devices | refresh | send | quit\n  settings | set <send|receive|automatic|text|images|notifications> <on|off>\n  set history <off|status|content>\n  set history-limit <0..10000>\n  set history-memory-mib <0..64> | set history-image-mib <0..1024>\n  peer <full fingerprint> <send|receive|text|images|quiet> <on|off>\n  history [preview|copy|resend <id>] | history clear\n  history copy <id> --local-only\n  autostart <status|on|off>\nAppend --json for the versioned local API response.\n";
 
 #[cfg(test)]
 mod tests {
@@ -280,7 +298,7 @@ mod tests {
                 Action::Settings => Answer::Settings {
                     settings: Settings::default(),
                 },
-                Action::Configure { settings } => {
+                Action::Configure { settings, .. } => {
                     self.configured = Some(settings.clone());
                     Answer::Settings { settings }
                 }

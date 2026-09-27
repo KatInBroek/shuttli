@@ -116,7 +116,7 @@ struct Shared {
     epoch: [u8; 16],
     identity: Arc<Identity>,
     name: String,
-    events: mpsc::SyncSender<NetworkEvent>,
+    events: tokio::sync::mpsc::Sender<NetworkEvent>,
     revision: Arc<AtomicU64>,
     sessions: Mutex<HashMap<DeviceId, Session>>,
     pending: Mutex<HashMap<DeviceId, Outbound>>,
@@ -125,7 +125,7 @@ struct Shared {
     receive_slots: Semaphore,
 }
 pub struct TailscaleNetwork {
-    events: mpsc::Receiver<NetworkEvent>,
+    events: tokio::sync::mpsc::Receiver<NetworkEvent>,
     send: tokio::sync::mpsc::Sender<Outbound>,
     revision: Arc<AtomicU64>,
     refresh: Arc<tokio::sync::Notify>,
@@ -134,7 +134,7 @@ pub struct TailscaleNetwork {
 }
 impl TailscaleNetwork {
     pub fn open(identity: Identity, epoch: [u8; 16]) -> Result<Self> {
-        let (events_tx, events) = mpsc::sync_channel(64);
+        let (events_tx, events) = tokio::sync::mpsc::channel(64);
         let (send, sends) = tokio::sync::mpsc::channel::<Outbound>(16);
         let (queries, query_rx) = tokio::sync::mpsc::channel::<Query>(32);
         let revision = Arc::new(AtomicU64::new(1));
@@ -234,7 +234,7 @@ async fn run_network(
                 let mut pending=shared.pending.lock().await;
                 let expired:Vec<_>=pending.iter().filter(|(_,v)|v.queued.elapsed()>DEADLINE || v.permit.policy_revision()!=shared.revision.load(Ordering::SeqCst)).map(|(id,_)|*id).collect();
                 for id in expired {
-                    if let Some(out)=pending.remove(&id){report(&shared,&out,Err("queued transfer expired or permission changed".into()));}
+                    if let Some(out)=pending.remove(&id){report(&shared,&out,DeliveryState::Cancelled,"queued transfer expired or permission changed".into()).await;}
                 }
             },
             incoming=listener.accept()=>{
@@ -254,9 +254,9 @@ async fn run_network(
                 let target=out.permit.target();
                 let mut pending=shared.pending.lock().await;
                 if pending.len()>=16 && !pending.contains_key(&target){
-                    report(&shared,&out,Err("outgoing peer capacity reached".into()));continue;
+                    report(&shared,&out,DeliveryState::Failed,"outgoing peer capacity reached".into()).await;continue;
                 }
-                if let Some(old)=pending.insert(target,out){report(&shared,&old,Err("superseded by a newer copy".into()));}
+                if let Some(old)=pending.insert(target,out){report(&shared,&old,DeliveryState::Superseded,"superseded by a newer copy".into()).await;}
             }
         }
     }
@@ -422,13 +422,7 @@ async fn connect(s: Arc<Shared>, address: SocketAddr) -> Result<()> {
                     )
                     .await;
                 }
-                report(
-                    &s,
-                    &out,
-                    r.clone()
-                        .map_err(|e| format!("outcome unknown: {e}"))
-                        .and_then(TransferResult::receipt),
-                );
+                report_transfer(&s, &out, &r).await;
                 r?;
             }
             write_frame(&mut tls, &Frame::Poll).await?;
@@ -551,13 +545,7 @@ async fn incoming_connection(s: Arc<Shared>, stream: TcpStream, address: SocketA
                             )
                             .await;
                         }
-                        report(
-                            &s,
-                            &out,
-                            r.clone()
-                                .map_err(|e| format!("outcome unknown: {e}"))
-                                .and_then(TransferResult::receipt),
-                        );
+                        report_transfer(&s, &out, &r).await;
                         r?;
                     } else {
                         write_frame(&mut tls, &Frame::Idle).await?;
@@ -581,35 +569,37 @@ async fn disconnected(s: &Shared, id: DeviceId, live: &Arc<std::sync::atomic::At
     {
         if let Some(mut v) = sessions.remove(&id) {
             v.peer.online = false;
-            let _ = s.events.try_send(NetworkEvent::Peer(v.peer));
+            drop(sessions);
+            let _ = s.events.send(NetworkEvent::Peer(v.peer)).await;
         }
     }
 }
-fn report(s: &Shared, out: &Outbound, result: Result<()>) {
-    let (state, detail) = match result {
-        Ok(()) => (
+async fn report(s: &Shared, out: &Outbound, state: DeliveryState, detail: String) {
+    // Await capacity: terminal results are never dropped while the service lives.
+    // Producers are bounded by session/handshake slots and the outgoing queue.
+    let _ = s
+        .events
+        .send(NetworkEvent::Delivery {
+            event: out.permit.event(),
+            peer: hex::encode(out.permit.target()),
+            state,
+            detail,
+        })
+        .await;
+}
+fn transfer_outcome(result: &Result<TransferResult>) -> (DeliveryState, String) {
+    match result {
+        Ok(TransferResult::Applied) => (
             DeliveryState::Applied,
             "remote OS readback and durable receipt completed".into(),
         ),
-        Err(e) => {
-            let state = if e.starts_with("outcome unknown:") {
-                DeliveryState::Unknown
-            } else if e.starts_with("superseded") {
-                DeliveryState::Superseded
-            } else if e.starts_with("queued transfer") {
-                DeliveryState::Cancelled
-            } else {
-                DeliveryState::Failed
-            };
-            (state, e)
-        }
-    };
-    let _ = s.events.try_send(NetworkEvent::Delivery {
-        event: out.permit.event(),
-        peer: hex::encode(out.permit.target()),
-        state,
-        detail,
-    });
+        Ok(TransferResult::Rejected(message)) => (DeliveryState::Failed, message.clone()),
+        Err(message) => (DeliveryState::Unknown, message.clone()),
+    }
+}
+async fn report_transfer(s: &Shared, out: &Outbound, result: &Result<TransferResult>) {
+    let (state, detail) = transfer_outcome(result);
+    report(s, out, state, detail).await;
 }
 async fn enqueue_query(s: &Shared, query: Query) {
     let mut q = s.queries.lock().await;
@@ -637,31 +627,39 @@ async fn query_transfer(s: &Shared, tls: &mut impl Duplex, mut query: Query) -> 
                         None | Some(DeliveryState::Applied | DeliveryState::Unknown)
                     ) =>
             {
-                let state = state.unwrap_or(DeliveryState::Unknown);
-                let _ = s.events.try_send(NetworkEvent::Delivery {
-                    event,
-                    peer: hex::encode(query.peer),
-                    state,
-                    detail: if state == DeliveryState::Applied {
-                        "durable receiver receipt recovered without reapplying clipboard"
-                    } else {
-                        "receiver has no confirmed applied receipt"
-                    }
-                    .into(),
-                });
-                Ok(())
+                Ok(state.unwrap_or(DeliveryState::Unknown))
             }
             _ => Err("invalid receipt response".into()),
         }
     })
     .await
     .unwrap_or_else(|_| Err("receipt query timeout".into()));
-    if result.is_err() && query.attempts < 2 {
-        query.attempts += 1;
-        enqueue_query(s, query).await;
+    match result {
+        Ok(state) => s
+            .events
+            .send(NetworkEvent::Delivery {
+                event: query.event,
+                peer: hex::encode(query.peer),
+                state,
+                detail: if state == DeliveryState::Applied {
+                    "durable receiver receipt recovered without reapplying clipboard"
+                } else {
+                    "receiver has no confirmed applied receipt"
+                }
+                .into(),
+            })
+            .await
+            .map_err(|_| "application stopped".into()),
+        Err(error) => {
+            if query.attempts < 2 {
+                query.attempts += 1;
+                enqueue_query(s, query).await;
+            }
+            Err(error)
+        }
     }
-    result
 }
+
 async fn answer_query(
     s: &Shared,
     tls: &mut impl Duplex,
@@ -708,14 +706,6 @@ enum TransferResult {
     Applied,
     Rejected(String),
 }
-impl TransferResult {
-    fn receipt(self) -> Result<()> {
-        match self {
-            Self::Applied => Ok(()),
-            Self::Rejected(e) => Err(e),
-        }
-    }
-}
 async fn send_transfer(
     s: &Shared,
     tls: &mut impl Duplex,
@@ -757,7 +747,7 @@ async fn send_transfer(
     }
 }
 struct ReceiveGuard {
-    events: mpsc::SyncSender<NetworkEvent>,
+    permit: Option<tokio::sync::mpsc::OwnedPermit<NetworkEvent>>,
     event: EventId,
     peer: String,
     active: bool,
@@ -765,12 +755,15 @@ struct ReceiveGuard {
 impl Drop for ReceiveGuard {
     fn drop(&mut self) {
         if self.active {
-            let _ = self.events.try_send(NetworkEvent::Delivery {
-                event: self.event,
-                peer: self.peer.clone(),
-                state: DeliveryState::Unknown,
-                detail: "receive interrupted before a confirmed completion".into(),
-            });
+            self.permit
+                .take()
+                .expect("reserved completion slot")
+                .send(NetworkEvent::Delivery {
+                    event: self.event,
+                    peer: self.peer.clone(),
+                    state: DeliveryState::Unknown,
+                    detail: "receive interrupted before a confirmed completion".into(),
+                });
         }
     }
 }
@@ -782,7 +775,12 @@ async fn receive_transfer(
     meta: Metadata,
 ) -> Result<()> {
     let mut guard = ReceiveGuard {
-        events: s.events.clone(),
+        permit: Some(
+            s.events
+                .clone()
+                .try_reserve_owned()
+                .map_err(|_| "application busy")?,
+        ),
         event,
         peer: hex::encode(id),
         active: true,
@@ -891,7 +889,7 @@ mod tests {
     use super::*;
     #[tokio::test(flavor = "current_thread")]
     async fn offline_start_does_not_queue_content_and_keeps_latest_permission_revision() {
-        let (_, events) = mpsc::sync_channel(1);
+        let (_, events) = tokio::sync::mpsc::channel(1);
         let (send, mut outgoing) = tokio::sync::mpsc::channel(1);
         let (queries, _) = tokio::sync::mpsc::channel(1);
         let ready = Arc::new(AtomicBool::new(false));
@@ -968,5 +966,185 @@ mod tests {
             })
             .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod delivery_tests {
+    use super::*;
+    fn fixture() -> (
+        Arc<Shared>,
+        tokio::sync::mpsc::Receiver<NetworkEvent>,
+        Outbound,
+    ) {
+        let random = crate::random_epoch().unwrap();
+        let dir = std::env::temp_dir().join(format!("shuttli-delivery-{random:?}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let identity = Arc::new(Identity::load(&dir).unwrap());
+        std::fs::remove_dir_all(dir).unwrap();
+        let (events, receiver) = tokio::sync::mpsc::channel(64);
+        let shared = Arc::new(Shared {
+            epoch: [1; 16],
+            identity,
+            name: "Synthetic".into(),
+            events,
+            revision: Arc::new(AtomicU64::new(1)),
+            sessions: Mutex::new(HashMap::new()),
+            pending: Mutex::new(HashMap::new()),
+            queries: Mutex::new(VecDeque::new()),
+            budget: Mutex::new((Instant::now(), 0)),
+            receive_slots: Semaphore::new(2),
+        });
+        let mut settings = Settings::default();
+        settings.peers.insert(
+            "peer".into(),
+            PeerPolicy {
+                send: true,
+                ..PeerPolicy::default()
+            },
+        );
+        let mut core = shuttli_core::sync::SyncCore::new([1; 32], [1; 16], settings);
+        core.register([2; 32], "peer".into()).unwrap();
+        let body = payload(Format::Text, b"synthetic".to_vec()).unwrap();
+        let stamp = ClipboardStamp {
+            generation: 1,
+            digest: body.meta.digest,
+            sensitive: false,
+        };
+        let permit = core.manual(stamp, &body.meta).unwrap().pop().unwrap();
+        (
+            shared,
+            receiver,
+            Outbound {
+                permit,
+                payload: body,
+                queued: Instant::now(),
+            },
+        )
+    }
+    fn fill(shared: &Shared, n: usize) {
+        for _ in 0..n {
+            shared
+                .events
+                .try_send(NetworkEvent::Peer(PeerInfo {
+                    id: "02".repeat(32),
+                    name: "Synthetic".into(),
+                    address: "fixture".into(),
+                    online: true,
+                }))
+                .ok()
+                .unwrap();
+        }
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn full_queue_retains_success_until_consumer_has_capacity() {
+        let (shared, mut receiver, out) = fixture();
+        fill(&shared, 64);
+        let producer = tokio::spawn(async move {
+            report_transfer(&shared, &out, &Ok(TransferResult::Applied)).await;
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            !producer.is_finished(),
+            "terminal result must wait for capacity"
+        );
+        for _ in 0..64 {
+            assert!(matches!(receiver.recv().await, Some(NetworkEvent::Peer(_))));
+        }
+        timeout(Duration::from_secs(1), producer)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            receiver.recv().await,
+            Some(NetworkEvent::Delivery {
+                state: DeliveryState::Applied,
+                ..
+            })
+        ));
+        assert!(receiver.try_recv().is_err());
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn receipt_recovery_survives_a_full_application_queue() {
+        let (shared, mut receiver, out) = fixture();
+        fill(&shared, 64);
+        let query = Query {
+            peer: out.permit.target(),
+            event: out.permit.event(),
+            attempts: 0,
+        };
+        let (mut client, mut remote) = tokio::io::duplex(4096);
+        let producer =
+            tokio::spawn(async move { query_transfer(&shared, &mut client, query).await });
+        let Frame::Status { event } = read_frame(&mut remote).await.unwrap() else {
+            panic!()
+        };
+        write_frame(
+            &mut remote,
+            &Frame::Receipt {
+                event,
+                state: Some(DeliveryState::Applied),
+            },
+        )
+        .await
+        .unwrap();
+        tokio::task::yield_now().await;
+        assert!(!producer.is_finished());
+        for _ in 0..64 {
+            receiver.recv().await.unwrap();
+        }
+        timeout(Duration::from_secs(1), producer)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            receiver.recv().await,
+            Some(NetworkEvent::Delivery {
+                state: DeliveryState::Applied,
+                ..
+            })
+        ));
+    }
+    #[test]
+    fn cancelled_receive_has_reserved_completion_capacity() {
+        let (shared, mut receiver, out) = fixture();
+        let permit = shared.events.clone().try_reserve_owned().unwrap();
+        fill(&shared, 63);
+        assert!(shared.events.clone().try_reserve_owned().is_err());
+        drop(ReceiveGuard {
+            permit: Some(permit),
+            event: out.permit.event(),
+            peer: "fixture".into(),
+            active: true,
+        });
+        for _ in 0..63 {
+            assert!(matches!(receiver.try_recv(), Ok(NetworkEvent::Peer(_))));
+        }
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(NetworkEvent::Delivery {
+                state: DeliveryState::Unknown,
+                ..
+            })
+        ));
+    }
+    #[test]
+    fn delivery_classification_is_independent_of_error_wording() {
+        for text in [
+            "superseded",
+            "queued transfer",
+            "outcome unknown:",
+            "arbitrary localized message",
+        ] {
+            assert_eq!(
+                transfer_outcome(&Ok(TransferResult::Rejected(text.into()))).0,
+                DeliveryState::Failed
+            );
+            assert_eq!(
+                transfer_outcome(&Err(text.into())).0,
+                DeliveryState::Unknown
+            );
+        }
     }
 }

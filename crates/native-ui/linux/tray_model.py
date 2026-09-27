@@ -43,11 +43,15 @@ class TrayState:
             (20, self.text('tray.enable_send'), self.available, self.send),
             (21, self.text('tray.enable_receive'), self.available, self.receive),
             (30, self.text('tray.send'), self.available and self.send, None),
+            (39, None, False, None),
+            (40, self.text('tray.quit'), self.available, None),
         ]
 
     def action(self, ident):
         if not self.available:
             return None
+        if ident == 40:
+            return {'command': 'quit'}
         if ident == 20:
             return {'command': 'set_directions', 'send': not self.send}
         if ident == 21:

@@ -35,6 +35,7 @@ def wait(predicate, timeout=8):
 def main():
     state = dict(send=True, receive=True)
     available = True
+    quit_requested = threading.Event()
 
     class Api(socketserver.StreamRequestHandler):
         def handle(self):
@@ -42,6 +43,9 @@ def main():
             if action['command'] == 'set_directions':
                 state.update({k: v for k, v in action.items() if k != 'command'})
             answer = dict(type='status', status=dict(settings=state.copy())) if available else dict(type='error')
+            if action['command'] == 'quit':
+                quit_requested.set()
+                answer = {'type': 'done', 'message': 'Agent is stopping'}
             self.wfile.write(json.dumps(answer).encode())
 
     with tempfile.TemporaryDirectory() as directory:
@@ -127,6 +131,10 @@ def main():
             wait(lambda: time.monotonic() >= until, timeout=4)
             assert len(updates) == count, 'unchanged polls must not broadcast menu updates'
             print('PASS locale, unavailable/recovery and unchanged-poll behavior', flush=True)
+            assert cache[40]['label'] == translator('tray.quit')
+            call('Event', '(isvu)', (40, 'clicked', GLib.Variant('i', 0), 0))
+            wait(lambda: quit_requested.is_set() and child.poll() == 0)
+            print('PASS localized Quit menu invokes the lifecycle API and exits the tray', flush=True)
         finally:
             bus.signal_unsubscribe(subscription)
             child.terminate()

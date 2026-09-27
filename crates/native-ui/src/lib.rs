@@ -19,3 +19,5 @@ pub const UI_STYLE: &str = include_str!("../linux/style.css");
 pub const UI_MARK: &str = include_str!("../assets/mark.svg");
 
 pub const TRAY_ICONS: &str = include_str!("../linux/tray_icons.py");
+
+pub const CONTROL_CLIENT: &str = include_str!("../linux/control_client.py");

@@ -54,6 +54,8 @@ class Fixture(ui.Window):
                     settings=copy.deepcopy(self.fixture_settings), sequence=self.seq, policy_revision=self.revision, last_error=None)}
         if command in ('settings', 'configure', 'set_directions'):
             if command == 'configure':
+                if action['expected'] != self.fixture_settings:
+                    return {'type': 'error', 'message': 'settings changed; refresh before retrying'}
                 self.fixture_settings = copy.deepcopy(action['settings'])
                 self.revision += 1
             if command == 'set_directions':
@@ -63,6 +65,9 @@ class Fixture(ui.Window):
         if command == 'devices':
             return {'type': 'devices', 'devices': copy.deepcopy(self.fixture_peers), 'settings': copy.deepcopy(self.fixture_settings)}
         if command == 'peer':
+            current = dict(ui.DEFAULT_POLICY, **self.fixture_settings['peers'].get(action['id'], {}))
+            if action['expected'] != current:
+                return {'type': 'error', 'message': 'device settings changed; refresh before retrying'}
             self.fixture_settings['peers'][action['id']] = copy.deepcopy(action['policy'])
             self.revision += 1
             return {'type': 'settings', 'settings': copy.deepcopy(self.fixture_settings)}
@@ -72,7 +77,9 @@ class Fixture(ui.Window):
             return dict(type='preview', format='text', base64=base64.b64encode(b'Synthetic clipboard preview\nSecond line').decode())
         if command == 'clear_history':
             self.entries.clear()
-        return {'type': 'done', 'message': 'disabled' if command == 'autostart' else 'Synthetic operation completed'}
+        if command == 'autostart':
+            return {'type': 'autostart', 'status': {'state': 'disabled', 'message': 'disabled'}}
+        return {'type': 'done', 'message': 'Synthetic operation completed'}
 
 
 def run():
@@ -119,7 +126,7 @@ def run():
         screenshot('devices-light')
         device_buttons = [w for w in descendants(window.content) if isinstance(w, Gtk.Button) and w.has_css_class('row-button')]
         device_buttons[0].emit('clicked')
-        wait_for(lambda: len([w for w in descendants(window) if isinstance(w, Gtk.Switch)]) == 6)
+        wait_for(lambda: len([w for w in descendants(window) if isinstance(w, Gtk.Switch)]) == 5)
         screenshot('device-light')
         switches = [w for w in descendants(window) if isinstance(w, Gtk.Switch)]
         switches[0].set_active(True)

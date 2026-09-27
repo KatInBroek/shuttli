@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,6 +50,20 @@ def evaluate(report, expected):
             'branches': 'not measured by this stable-toolchain run'}
 
 
+def declarations_only(source):
+    """LLVM emits no coverage for a module manifest with no executable items.
+
+    Recognize only this narrow grammar; adding a function, macro invocation or
+    other item makes the file mandatory in the measured report again.
+    """
+    lines = [line.strip() for line in source.splitlines()
+             if line.strip() and not line.lstrip().startswith('//')]
+    return bool(lines) and all(re.fullmatch(
+        r'#!\[no_std\]|pub mod [A-Za-z_][A-Za-z_0-9]*;|'
+        r'pub use [A-Za-z_][A-Za-z_0-9:]*(?: as [A-Za-z_][A-Za-z_0-9]*)?;', line)
+        for line in lines)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('report')
@@ -56,10 +71,11 @@ def main():
     args = parser.parse_args()
     production = sorted(p for p in (ROOT / 'crates/core/src').rglob('*.rs')
                         if 'tests' not in p.relative_to(ROOT / 'crates/core/src').parts)
-    names = [p.relative_to(ROOT).as_posix() for p in production]
+    names = [p.relative_to(ROOT).as_posix() for p in production if not declarations_only(p.read_text())]
     summary = evaluate(json.loads(Path(args.report).read_text()), names)
-    summary['source_sha256'] = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
-                                for name in names}
+    summary['declaration_only_sources'] = [p.relative_to(ROOT).as_posix() for p in production if declarations_only(p.read_text())]
+    summary['source_sha256'] = {p.relative_to(ROOT).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+                                for p in production}
     if args.summary_output:
         output = Path(args.summary_output)
         output.parent.mkdir(parents=True, exist_ok=True)

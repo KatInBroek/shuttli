@@ -41,7 +41,8 @@ final class Model: ObservableObject {
                       let answer = try JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { throw NSError(domain: "Invalid agent response", code: 1) }
                 DispatchQueue.main.async {
                     self.pending -= 1
-                    if !silent || answer["type"] as? String == "error" { self.message = answer["message"] as? String ?? "" }
+                    if answer["type"] as? String == "stopped" { NSApp.terminate(nil); return }
+                    if !silent || answer["type"] as? String == "error" { self.message = answer["message"] as? String ?? (answer["status"] as? [String:Any])?["message"] as? String ?? "" }
                     if answer["type"] as? String != "error" { complete?(answer) }
                 }
             } catch { DispatchQueue.main.async { self.pending -= 1; self.message = "Cannot reach the agent: \(error.localizedDescription)" } }
@@ -98,7 +99,7 @@ struct Content: View {
                     ForEach(model.peers) { peer in VStack(alignment: .leading, spacing: 8) {
                         Text(peer.name).font(.headline); Text(peer.address + (peer.online ? " · Online" : " · Offline"))
                         Text(peer.id).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                        HStack { ForEach(["send", "receive", "blocked", "text", "png", "quiet"], id: \.self) { key in
+                        HStack { ForEach(["send", "receive", "text", "png", "quiet"], id: \.self) { key in
                             Toggle(key == "png" ? "Images" : key.capitalized, isOn: Binding(get: { peer.policy[key] as? Bool ?? ["receive", "text", "png"].contains(key) }, set: { on in model.call(["peer", peer.id, key, on ? "on" : "off"]) { _ in model.refresh() } })).toggleStyle(.checkbox)
                         } }
                         Divider()
@@ -149,11 +150,14 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.addItem(withTitle: "Open " + ProductBrand.name, action: #selector(show), keyEquivalent: "")
         menu.addItem(withTitle: "Send clipboard now", action: #selector(send), keyEquivalent: "")
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(withTitle: "Quit menu app", action: #selector(quit), keyEquivalent: "")
+        menu.addItem(withTitle: "Quit " + ProductBrand.name, action: #selector(quit), keyEquivalent: "")
         for entry in menu.items { entry.target = self }
         item.menu = menu
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            if let self = self, self.window?.isVisible == true { self.model.history(silent: true) }
+            guard let self = self else { return }
+            self.model.call(["status"], silent: true) { [weak self] _ in
+                if let self = self, self.window?.isVisible == true { self.model.history(silent: true) }
+            }
         }
         if !CommandLine.arguments.contains("--background") { show() }
     }
@@ -167,7 +171,7 @@ final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     func windowWillClose(_ notification: Notification) { model.previewImage = nil; model.previewText = nil; model.entries = [] }
     @objc func send() { model.call(["send"]) }
-    @objc func quit() { NSApp.terminate(nil) }
+    @objc func quit() { model.call(["quit"]) { _ in NSApp.terminate(nil) } }
 }
 let app = NSApplication.shared
 let delegate = Delegate()

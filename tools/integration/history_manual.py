@@ -31,7 +31,7 @@ def main():
     original = {n.label: n.api('settings')['settings'] for n in nodes}
     results = []
     def configure(n, settings):
-        n.api('request', json.dumps({'version': 1, 'action': {'command': 'configure', 'settings': settings}}))
+        n.api('request', json.dumps({'version': 2, 'action': {'command': 'configure', 'expected': n.api('settings')['settings'], 'settings': settings}}))
     try:
         for n in nodes:
             settings = copy.deepcopy(original[n.label])

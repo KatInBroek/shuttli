@@ -1,4 +1,5 @@
 use crate::files::atomic_write;
+use shuttli_model::sync::{AutostartState, AutostartStatus};
 use shuttli_ports::sync::{Platform, Result};
 use std::{
     path::PathBuf,
@@ -106,7 +107,7 @@ impl Platform for NativePlatform {
             .get_or_insert_with(Notifier::new)
             .send(title.into(), body.into());
     }
-    fn autostart(&mut self, enabled: Option<bool>) -> Result<String> {
+    fn autostart(&mut self, enabled: Option<bool>) -> Result<AutostartStatus> {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         let exe = exe.to_str().ok_or("non-Unicode application path")?;
         if cfg!(target_os = "linux") {
@@ -130,16 +131,20 @@ impl Platform for NativePlatform {
                 }
             }
             let data = std::fs::read_to_string(path).unwrap_or_default();
-            Ok(if data.is_empty()
-                || data
-                    .lines()
-                    .any(|l| l == "Hidden=true" || l == "X-GNOME-Autostart-enabled=false")
-            {
-                "disabled"
-            } else {
-                "enabled (current user's graphical login)"
-            }
-            .into())
+            Ok(
+                if data.is_empty()
+                    || data
+                        .lines()
+                        .any(|l| l == "Hidden=true" || l == "X-GNOME-Autostart-enabled=false")
+                {
+                    status(AutostartState::Disabled, "disabled")
+                } else {
+                    status(
+                        AutostartState::Enabled,
+                        "enabled (current user's graphical login)",
+                    )
+                },
+            )
         } else if cfg!(target_os = "macos") {
             let dir = home()?.join("Library/LaunchAgents");
             let path = dir.join("org.shuttli.agent.plist");
@@ -158,7 +163,7 @@ impl Platform for NativePlatform {
                 }
             }
             if !path.exists() {
-                return Ok("disabled".into());
+                return Ok(status(AutostartState::Disabled, "disabled"));
             }
             if let Ok(b) =
                 crate::discovery::command_output("launchctl", &["print-disabled", &domain])
@@ -168,12 +173,25 @@ impl Platform for NativePlatform {
                     .lines()
                     .any(|l| l.contains("org.shuttli.agent") && l.contains("true"))
                 {
-                    return Ok("requires_user_action (disabled by macOS)".into());
+                    return Ok(status(
+                        AutostartState::RequiresUserAction,
+                        "requires_user_action (disabled by macOS)",
+                    ));
                 }
             }
-            Ok("enabled (registered for next graphical login)".into())
+            Ok(status(
+                AutostartState::Enabled,
+                "enabled (registered for next graphical login)",
+            ))
         } else {
             Err("autostart unsupported on this platform".into())
         }
+    }
+}
+
+fn status(state: AutostartState, message: &str) -> AutostartStatus {
+    AutostartStatus {
+        state,
+        message: message.into(),
     }
 }

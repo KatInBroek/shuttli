@@ -12,7 +12,7 @@ When open, discover desktops without QR codes or addresses, explicitly import/se
 
 An upgraded desktop obtains the phone address from Tailscale and connects to its foreground listener on the application port. Display a device only after TLS/application authentication. Deduplicate public-key identities; name/address changes preserve policy, key changes create a new device. Receiving defaults on, sending to new peers defaults off. Offer full-fingerprint comparison before allowing each outgoing direction; no bidirectional pairing ceremony is required.
 
-Explain that received content enters the app and does not automatically overwrite the OS clipboard. Desktop-assisted discovery targets 40 seconds on a healthy network; phone refresh does not force unknown desktops to rescan. Diagnose blocked inbound policy accurately without assuming an empty list means Tailscale is logged out.
+Explain that received content enters the app and does not automatically overwrite the OS clipboard. Desktop-assisted discovery targets 40 seconds on a healthy network; phone refresh does not force unknown desktops to rescan. Diagnose disabled receiving accurately without assuming an empty list means Tailscale is logged out.
 
 ## Explicit import and send
 
@@ -28,7 +28,7 @@ Validated incoming content enters the bounded active inbox and returns Received.
 
 Render text as plain text. Decode image previews on demand and release large objects when leaving details. Evicted, replaced or cleared content cannot silently become another item's body. Test actual text/image paste into other apps.
 
-Defaults: global send/receive on, new-peer send off/receive on, manual sending. Global/per-peer block, type, history and quiet controls apply to every send/resend/receive path. Failed persistence returns actual state and preserves fail-closed behavior.
+Defaults: global send/receive on, new-peer send off/receive on, manual sending. Global/per-peer direction, type, history and quiet controls apply to every send/resend/receive path. Failed persistence returns actual state and preserves fail-closed behavior.
 
 History defaults to 20 events (0-10,000, subject to quotas); modes Off/Status/Content; preview, local copy, resend and clear. Text/list data is session memory and images are encrypted temporary objects. History off retains only one bounded active inbox item. History and active items share capacity. Clear removes app drafts/inbox/cache, not system clipboards or remote deliveries. Process restart restores identity/policy/replay/receipts but no history bodies.
 

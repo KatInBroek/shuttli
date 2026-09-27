@@ -23,6 +23,13 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      - name: Exercise production X11 adapter against an independent clipboard client
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y xvfb xclip dbus-x11 python3-gi
+          xvfb-run -a cargo test --locked -p shuttli-contract-tests --test native_clipboard -- --ignored
+          cargo build --locked -p shuttli-host
+          xvfb-run -a dbus-run-session -- python3 tools/integration/daemon_lifecycle.py --binary target/debug/shuttli
       - run: python tools/check_architecture.py
       - run: python -m unittest discover -s tools/tests -v
       - run: cargo run --locked -p shuttli-host -- --help

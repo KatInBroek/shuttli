@@ -8,7 +8,7 @@ Peer-to-peer clipboard sync with per-device permissions and verified delivery.
 
 - Direct TLS 1.3 connections; no central clipboard server.
 - New devices have outgoing sync disabled. Allow individual device fingerprints; receiving is enabled by default.
-- Independent global/per-device send, receive, block and content controls; automatic or manual sync.
+- Independent global/per-device send, receive and content controls; automatic or manual sync.
 - Core-owned publication/write permissions and conservative clipboard echo suppression.
 - Success only after the receiver reads back the OS clipboard and persists its result.
 - Ordinary local copies enter history even when sending is paused; received items retain their source and outgoing items retain each target's result.
@@ -33,7 +33,7 @@ python3 tools/install.py
 shuttli ui
 ```
 
-On Linux, the tray icon opens a menu with **Open application**, **Enable sending**, **Enable receiving**, and **Send clipboard now**. The icon distinguishes both directions enabled, send only, receive only, and both paused. Closing the window keeps the tray and agent running. A StatusNotifier-compatible panel is required (tested on Xfce); desktops without a tray host retain the launcher and CLI.
+On Linux, the tray icon opens a menu with **Open application**, **Enable sending**, **Enable receiving**, **Send clipboard now**, and **Quit**. The icon distinguishes both directions enabled, send only, receive only, and both paused. Closing the window keeps the tray and agent running. **Quit** or `shuttli quit` stops the background agent and tray without changing synchronization preferences or login-start registration. A StatusNotifier-compatible panel is required (tested on Xfce); desktops without a tray host retain the launcher and CLI.
 
 The installer writes to your user account (`~/.local/bin`; also `~/Applications/Shuttli.app` on macOS). Start `shuttli daemon` in the graphical login environment if you prefer CLI-only operation. The default CLI talks to that single agent, including when called from SSH/tmux.
 
@@ -51,6 +51,8 @@ shuttli history copy <id> --local-only
 shuttli history resend <id>
 shuttli set receive off
 shuttli autostart on
+# Stop the background agent and tray.
+shuttli quit
 ```
 
 `shuttli --help` lists commands. Add `--json` for structured output. Settings and data live in `~/.local/share/shuttli` on Linux or `~/Library/Application Support/Shuttli` on macOS. `SHUTTLI_DATA_DIR` selects an isolated profile for development. History defaults to recent content: text/list in memory and temporary encrypted images on disk, with a session-only key. No Keychain/Secret Service is required. Restart clears history; eviction and `history clear` remove image files. Existing settings are preserved.

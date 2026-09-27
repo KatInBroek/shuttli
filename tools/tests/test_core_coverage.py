@@ -15,6 +15,12 @@ class CoverageGateTests(unittest.TestCase):
                                     'summary': {m: {'count': count, 'covered': covered}
                                                 for m in gate.METRICS}}]}]}
 
+    def test_only_verified_declarations_can_lack_llvm_regions(self):
+        self.assertTrue(gate.declarations_only('//! crate docs\n#![no_std]\npub mod sync;\npub use sync::Publication as LocalPublication;'))
+        for source in ('pub fn hidden() {}', 'include!("hidden.rs");', 'const X: u8 = run();',
+                       '#[cfg(test)]\npub mod sync;', 'pub mod sync; pub fn hidden() {}'):
+            self.assertFalse(gate.declarations_only(source))
+
     def test_strict_boundary(self):
         for covered in (0, 94, 95):
             with self.subTest(covered=covered), self.assertRaises(ValueError):

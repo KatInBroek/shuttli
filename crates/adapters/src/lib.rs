@@ -1,19 +1,4 @@
-//! Safe unavailable backend for the foundation binary. No OS setting is changed.
-
-use shuttli_model::{AutostartObserved, PortError};
-use shuttli_ports::AutostartPort;
-
-pub struct UnavailableAutostart;
-
-impl AutostartPort for UnavailableAutostart {
-    fn query(&mut self) -> Result<AutostartObserved, PortError> {
-        Ok(AutostartObserved::Unavailable)
-    }
-    fn set_enabled(&mut self, _: bool) -> Result<(), PortError> {
-        Err(PortError::Unavailable)
-    }
-}
-
+//! Production OS, storage and transport adapters.
 pub mod content;
 
 pub mod clipboard;

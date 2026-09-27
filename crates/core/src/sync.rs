@@ -127,13 +127,11 @@ impl SyncCore {
     }
     fn allowed(&self, id: DeviceId, meta: &Metadata, send: bool) -> bool {
         let p = self.policy(id);
-        !p.blocked
-            && if send {
-                self.settings.send && p.send
-            } else {
-                self.settings.receive && p.receive
-            }
-            && meta.size <= p.max_bytes
+        (if send {
+            self.settings.send && p.send
+        } else {
+            self.settings.receive && p.receive
+        }) && meta.size <= p.max_bytes
             && meta.size <= 8 * 1024 * 1024
             && match meta.format {
                 Format::Text => self.settings.text && p.text && meta.size <= 1024 * 1024,

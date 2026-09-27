@@ -227,8 +227,8 @@ finally:
     # Restore the user's mode and permissions, not a hardcoded manual mode.
     for side in original:
         try:
-            api(side, 'request', json.dumps({'version': 1, 'action': {
-                'command': 'configure', 'settings': original[side]}}))
+            api(side, 'request', json.dumps({'version': 2, 'action': {
+                'command': 'configure', 'expected': api(side, 'settings')['settings'], 'settings': original[side]}}))
         except Exception as exc:
             print('cleanup failed:', side, str(exc), flush=True)
     for child in children:

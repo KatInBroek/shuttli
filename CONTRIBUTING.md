@@ -34,6 +34,41 @@ independent security certification or reproducible builds without evidence.
 
 Architecture checks cover transitive, build, development and platform-specific dependencies. Replay the same event/command traces when replacing an adapter or UI. Changing history or notification presentation must not change core publication counts. An OS write and its independent readback are separate operations; returning the input buffer is not verification. Durable replay/receipt records remain independent of disposable session history.
 
+### Control and effect execution
+
+`api::control` is the single production client contract (local API version 2).
+Full settings and peer replacements must include the exact `expected` snapshot
+used to prepare the change. Conflicts fail without mutation; clients refresh and
+ask the user to retry instead of silently replaying stale edits. Direction-only
+commands are atomic patches. Per-device send and receive are the only direction
+controls; there is no separate device-block switch. Legacy persisted blocked
+policies migrate to both directions off, preserving the denial. Autostart state and delivery outcomes are typed;
+display messages never determine permissions or transfer outcomes.
+
+The application polls cooperative operations on one thread. Clipboard, storage
+and platform effects run on three dedicated workers with bounded queues. Status,
+discovery and policy controls remain available while an effect waits. Configuration
+revokes old permits before awaiting persistence; enabling requires a successful
+save and a fresh clipboard baseline. A newer configuration supersedes an older
+pending result. An OS write already in progress cannot promise rollback.
+
+Terminal network events wait for bounded channel capacity. Receives reserve a
+completion slot before starting, so cancellation can report its outcome without
+blocking the async runtime or allocating an unbounded retry queue. Only optional
+notifications may be dropped under overload.
+
+Explicit quit is a lifecycle command, distinct from pause or closing a window.
+It invalidates pending permits, drains bounded work, clears disposable history and
+preserves settings/startup registration. A local host lifecycle marker distinguishes
+an intentional stop from a crashed/unreachable service so presentation clients
+close only for the former; the next daemon start removes the marker.
+
+Contract tests exercise the production Store and Clipboard interfaces. SQLite
+contracts run on all CI platforms; the independent X11/xclip contract runs only
+in isolated Xvfb. Core coverage still includes every executable production item;
+declaration-only module manifests are checked separately because LLVM emits no
+regions for them. Runtime workers contain no application policy or composition.
+
 ## Localization and branding
 
 Keep English documentation and identifiers. UI catalogs intentionally support English, Dutch, German and French. Use stable semantic keys in `crates/native-ui/locales`, identical placeholders across catalogs and explicit plural rules. Device names, clipboard bodies and technical diagnostics are not translated. Language preferences are local and must not change sync policy.

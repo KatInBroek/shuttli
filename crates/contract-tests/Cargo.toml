@@ -16,3 +16,7 @@ workspace = true
 [dependencies]
 shuttli-ports.workspace = true
 shuttli-model.workspace = true
+
+[dev-dependencies]
+shuttli-adapters.workspace = true
+shuttli-core.workspace = true

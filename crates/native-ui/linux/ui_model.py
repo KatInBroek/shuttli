@@ -1,7 +1,7 @@
 """Presentation values; never decides synchronization permissions."""
 import json
 
-DEFAULT_POLICY = dict(send=False, receive=True, blocked=False, text=True, png=True,
+DEFAULT_POLICY = dict(send=False, receive=True, text=True, png=True,
                       max_bytes=8388608, quiet=False, history=None)
 
 
@@ -33,6 +33,5 @@ def peer_name(peers, fingerprint):
 
 
 def allowed_count(settings, peers):
-    return sum(bool(settings['peers'].get(p['id'], DEFAULT_POLICY).get('send') and
-                    not settings['peers'].get(p['id'], DEFAULT_POLICY).get('blocked'))
+    return sum(bool(settings['peers'].get(p['id'], DEFAULT_POLICY).get('send'))
                for p in peers)

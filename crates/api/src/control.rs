@@ -2,14 +2,17 @@ extern crate alloc;
 use alloc::{string::String, vec::Vec};
 use serde::{Deserialize, Serialize};
 use shuttli_model::sync::{Format, HistoryEntry, PeerInfo, PeerPolicy, Settings};
-pub const VERSION: u16 = 1;
+pub const VERSION: u16 = 2;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
     Status,
+    Quit,
     Devices,
     Settings,
     Configure {
+        /// Snapshot used to build this replacement; stale writes fail closed.
+        expected: Settings,
         settings: Settings,
     },
     /// Atomic direction changes do not overwrite another client's preferences.
@@ -19,6 +22,7 @@ pub enum Action {
     },
     Peer {
         id: String,
+        expected: PeerPolicy,
         policy: PeerPolicy,
     },
     Send,
@@ -61,6 +65,8 @@ pub struct Status {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Answer {
+    /// The local host completed an explicit quit; presentation clients may close.
+    Stopped,
     Status {
         status: Status,
     },
@@ -77,6 +83,9 @@ pub enum Answer {
     Preview {
         format: Format,
         base64: String,
+    },
+    Autostart {
+        status: shuttli_model::sync::AutostartStatus,
     },
     Done {
         message: String,

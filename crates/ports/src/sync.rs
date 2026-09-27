@@ -92,5 +92,5 @@ pub trait Network: Send {
 }
 pub trait Platform: Send {
     fn notify(&mut self, title: &str, body: &str);
-    fn autostart(&mut self, enabled: Option<bool>) -> Result<String>;
+    fn autostart(&mut self, enabled: Option<bool>) -> Result<AutostartStatus>;
 }

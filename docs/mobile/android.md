@@ -35,7 +35,7 @@ Readback must use an independent clipboard/provider path and verify readable byt
 
 ## Policy, history and UI
 
-Defaults: global send/receive on, new-device send off/receive on, manual sending. Apply per-peer block, direction, text/image, tighter retention and quiet rules. Offer full-fingerprint comparison; discovery cannot grant outgoing consent. Persistence failure must report actual state and fail closed.
+Defaults: global send/receive on, new-device send off/receive on, manual sending. Apply per-peer direction, text/image, tighter retention and quiet rules. Offer full-fingerprint comparison; discovery cannot grant outgoing consent. Persistence failure must report actual state and fail closed.
 
 History defaults to 20 events, configurable 0-10,000 subject to quotas; Off/Status/Content modes. Keep text/list data in session memory and images in a temporary encrypted cache. With history off, one bounded current inbox item remains usable. Active/history content shares one budget. Clear removes app inbox/drafts/previews/cache; explicitly explain that system clipboard exports follow their separate lifecycle. Missing bodies disable preview/copy/resend rather than substituting current content. Preserve identity/policy/replay/receipts separately across restart.
 
@@ -73,7 +73,7 @@ Depend on M01-M05, not iOS UI completion. Aim to test a near-stock device and a 
 | AND-04 | Inbox preview is correct, OS clipboard is unchanged and the sender sees Received rather than Applied. |
 | AND-05 | Other apps can paste copied text/images; granted URIs expose no unrelated data and do not cause forwarding. |
 | AND-06 | Clearing history removes history ciphertext/previews while active exported images remain pasteable according to their policy; expired/restarted URIs never return a different object. |
-| AND-07 | Global/per-peer/type/block rules cover every send/resend/receive path; enabling never replays content. |
+| AND-07 | Global/per-peer direction and content-type rules cover every send/resend/receive path; enabling never replays content. |
 | AND-08 | Default 20, zero, status mode, quota eviction and cleanup failures preserve correct availability. |
 | AND-09 | Focus, rotation, background, force-stop and resume cause no background reads/networking, duplicate SDK or old-draft replay. |
 | AND-10 | Split-tunneling, ACL, offline and old-version failures report real or unknown causes without fabricated connection/success. |

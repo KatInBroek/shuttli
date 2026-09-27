@@ -57,8 +57,8 @@ class Node:
         return self.api('history')['entries']
 
     def configure(self, settings):
-        answer = self.api('request', json.dumps({'version': 1, 'action': {
-            'command': 'configure', 'settings': settings}}))
+        answer = self.api('request', json.dumps({'version': 2, 'action': {
+            'command': 'configure', 'expected': self.api('settings')['settings'], 'settings': settings}}))
         assert answer['settings'] == settings, self.label + ': settings were not applied'
 
     def latest(self):
@@ -154,7 +154,7 @@ def main():
 
     def denied(setting, peer=False, kind='text'):
         command = ['peer', a.identity, setting] if peer else ['set', setting]
-        disabled, enabled = ('on', 'off') if setting == 'blocked' else ('off', 'on')
+        disabled, enabled = 'off', 'on'
         b.api(*command, disabled)
         try:
             baseline = b.inspect()
@@ -235,7 +235,6 @@ def main():
         record('global receive disabled', lambda: denied('receive'))
         record('global send disabled', send_off)
         record('peer receive disabled', lambda: denied('receive', peer=True))
-        record('peer blocked', lambda: denied('blocked', peer=True))
         record('peer send disabled', lambda: send_off(peer=True))
         record('text reception disabled', lambda: denied('text'))
         for n in nodes:

@@ -7,9 +7,9 @@ database, peer transport, or core implementation is imported by this process.
 from brand import NAME
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+from control_client import request as control_request
 import json
 import os
-import socket
 import subprocess
 import sys
 import time
@@ -75,6 +75,7 @@ class Tray:
         self.busy = False
         self.pending_directions = {}
         self.pending_send = False
+        self.pending_quit = False
         self.pool = ThreadPoolExecutor(max_workers=1)
         self.children = []
         self.last_open = 0
@@ -107,16 +108,7 @@ class Tray:
                              GLib.Variant('(s)', (self.name,)), None, Gio.DBusCallFlags.NONE, 3000, None, completed)
 
     def request(self, action):
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stream:
-            stream.settimeout(3)
-            stream.connect(self.path)
-            stream.sendall(json.dumps({'version': 1, 'action': action}).encode())
-            stream.shutdown(socket.SHUT_WR)
-            with stream.makefile('rb') as reader:
-                data = reader.read(1024 * 1024 + 1)
-            if len(data) > 1024 * 1024:
-                raise ValueError('control response exceeds tray limit')
-            return json.loads(data)
+        return control_request(self.path, action, timeout=3, max_response=1024 * 1024)
 
     def update(self, action=None):
         if os.getppid() != self.parent:
@@ -127,7 +119,11 @@ class Tray:
         self.children = [child for child in self.children if child.poll() is None]
         if self.busy:
             # Bounded/coalesced explicit intents survive a concurrent status poll.
-            if action and action['command'] == 'set_directions':
+            if action and action['command'] == 'quit':
+                self.pending_quit = True
+                self.pending_directions.clear()
+                self.pending_send = False
+            elif action and action['command'] == 'set_directions':
                 self.pending_directions.update({k: v for k, v in action.items() if k != 'command'})
             elif action and action['command'] == 'send':
                 self.pending_send = True
@@ -140,6 +136,9 @@ class Tray:
                     answer = self.request(action)
                     if answer['type'] == 'error':
                         error = answer['message']
+                    elif action['command'] == 'quit':
+                        GLib.idle_add(self.loop.quit)
+                        return
                 answer = self.request({'command': 'status'})
             except Exception:
                 answer = {'type': 'error'}
@@ -150,11 +149,19 @@ class Tray:
 
     def updated(self, answer, error):
         self.busy = False
+        if answer.get('type') == 'stopped':
+            self.loop.quit()
+            return False
         state = TrayState.from_answer(answer, self.locale)
         changed = state != self.state or error != self.error or self.locale_changed
         self.locale_changed = False
         self.state, self.error = state, error
-        if self.pending_directions:
+        if self.pending_quit:
+            self.pending_quit = False
+            self.pending_directions.clear()
+            self.pending_send = False
+            self.update({'command': 'quit'})
+        elif self.pending_directions:
             action = {'command': 'set_directions', **self.pending_directions}
             self.pending_directions.clear()
             self.update(action)

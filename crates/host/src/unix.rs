@@ -14,15 +14,25 @@ use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
-const MAX_REQUEST: u64 = 65536;
+const MAX_REQUEST: u64 = 256 * 1024;
 struct Remote {
     path: PathBuf,
 }
 impl ControlApi for Remote {
     fn request(&mut self, r: ControlRequest) -> Answer {
         fn call(path: &std::path::Path, r: ControlRequest) -> Result<Answer, String> {
-            let mut s = UnixStream::connect(path)
-                .map_err(|_| "agent is not running; start `shuttli daemon`")?;
+            let mut s = match UnixStream::connect(path) {
+                Ok(stream) => stream,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                    ) && path.with_file_name("stopped").is_file() =>
+                {
+                    return Ok(Answer::Stopped);
+                }
+                Err(_) => return Err("agent is not running; start `shuttli daemon`".into()),
+            };
             s.set_read_timeout(Some(Duration::from_secs(12)))
                 .map_err(|e| e.to_string())?;
             s.set_write_timeout(Some(Duration::from_secs(3)))
@@ -83,12 +93,63 @@ impl shuttli_ports::sync::Platform for PresentationPlatform {
         let (title, body) = shuttli_native_ui::i18n::notice(&self.profile, title, body);
         self.native.notify(&title, &body);
     }
-    fn autostart(&mut self, enabled: Option<bool>) -> Result<String, String> {
+    fn autostart(
+        &mut self,
+        enabled: Option<bool>,
+    ) -> Result<shuttli_model::sync::AutostartStatus, String> {
         self.native.autostart(enabled)
     }
 }
+type ControlMessage = (ControlRequest, mpsc::SyncSender<Answer>);
+fn serve_control(
+    mut stream: UnixStream,
+    sender: &mpsc::SyncSender<ControlMessage>,
+    host: &std::thread::Thread,
+) -> Result<(), String> {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .map_err(|e| e.to_string())?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .map_err(|e| e.to_string())?;
+    let mut bytes = Vec::new();
+    (&mut stream)
+        .take(MAX_REQUEST + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() > MAX_REQUEST as usize {
+        return Err("request too large".into());
+    }
+    let answer = match serde_json::from_slice::<ControlRequest>(&bytes) {
+        Ok(request) => {
+            let (reply, result) = mpsc::sync_channel(1);
+            if sender.try_send((request, reply)).is_err() {
+                Answer::Error {
+                    message: "agent busy".into(),
+                }
+            } else {
+                host.unpark();
+                result
+                    .recv_timeout(Duration::from_secs(10))
+                    .unwrap_or_else(|_| Answer::Error {
+                        message: "operation timed out; inspect current status before retrying"
+                            .into(),
+                    })
+            }
+        }
+        Err(_) => Answer::Error {
+            message: "invalid request".into(),
+        },
+    };
+    serde_json::to_writer(&mut stream, &answer).map_err(|e| e.to_string())
+}
 fn daemon(dir: PathBuf) -> Result<u8, String> {
     let _lock = files::instance_lock(&dir)?;
+    match std::fs::remove_file(dir.join("stopped")) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
+    }
     let identity = Identity::load(&dir)?;
     let id = identity.id;
     // Random restart epoch from the OS provider; no epoch is compared by magnitude.
@@ -103,14 +164,20 @@ fn daemon(dir: PathBuf) -> Result<u8, String> {
     });
     #[cfg(not(target_os = "linux"))]
     let platform = Box::<NativePlatform>::default();
-    let mut service = Service::new(
+    let service = shuttli_runtime::block_on(Service::new(
         id,
         epoch,
-        clipboard,
-        Box::new(store),
+        shuttli_runtime::worker("shuttli-clipboard", clipboard)?,
+        shuttli_runtime::worker(
+            "shuttli-store",
+            Box::new(store) as Box<dyn shuttli_ports::sync::Store>,
+        )?,
         Box::new(network),
-        platform,
-    )?;
+        shuttli_runtime::worker(
+            "shuttli-platform",
+            platform as Box<dyn shuttli_ports::sync::Platform>,
+        )?,
+    ))?;
     let path = dir.join("control.sock");
     if path.exists() {
         std::fs::remove_file(&path).map_err(|e| e.to_string())?;
@@ -119,16 +186,28 @@ fn daemon(dir: PathBuf) -> Result<u8, String> {
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
         .map_err(|e| e.to_string())?;
     let (tx, rx) = mpsc::sync_channel::<(ControlRequest, mpsc::SyncSender<Answer>)>(8);
-    std::thread::Builder::new().name("shuttli-control".into()).spawn(move||{
-  // Sequential bounded local IPC avoids unbounded threads from local callers.
-  for mut s in listener.incoming().flatten(){
-   let _=s.set_read_timeout(Some(Duration::from_secs(2)));let _=s.set_write_timeout(Some(Duration::from_secs(2)));
-   let mut bytes=Vec::new();let r=(&mut s).take(MAX_REQUEST+1).read_to_end(&mut bytes);
-   if r.is_err()||bytes.len()>MAX_REQUEST as usize{continue}
-   let answer=match serde_json::from_slice::<ControlRequest>(&bytes){Ok(r)=>{let(reply,answer)=mpsc::sync_channel(1);if tx.try_send((r,reply)).is_err(){Answer::Error{message:"agent busy".into()}}else{answer.recv_timeout(Duration::from_secs(10)).unwrap_or_else(|_|Answer::Error{message:"operation timed out; inspect current status before retrying".into()})}},Err(_)=>Answer::Error{message:"invalid request".into()}};
-   let _=serde_json::to_writer(&mut s,&answer);
-  }
- }).map_err(|e|e.to_string())?;
+    // Four bounded IPC readers prevent a slow request from blocking pause/status.
+    let listener = std::sync::Arc::new(listener);
+    let host_thread = std::thread::current();
+    let connections = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    for _ in 0..4 {
+        let listener = listener.clone();
+        let tx = tx.clone();
+        let host_thread = host_thread.clone();
+        let connections = connections.clone();
+        std::thread::Builder::new()
+            .name("shuttli-control".into())
+            .spawn(move || {
+                for stream in listener.incoming().flatten() {
+                    connections.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let _ = serve_control(stream, &tx, &host_thread);
+                    connections.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                    host_thread.unpark();
+                }
+            })
+            .map_err(|e| e.to_string())?;
+    }
+    drop(tx);
     eprintln!(
         "{} agent ready; local control socket available",
         shuttli_brand::NAME
@@ -145,6 +224,8 @@ fn daemon(dir: PathBuf) -> Result<u8, String> {
         }
     };
     let mut next = Instant::now();
+    let ticking = std::cell::Cell::new(false);
+    let mut tasks: Vec<shuttli_runtime::Task<'_>> = Vec::new();
     loop {
         #[cfg(target_os = "linux")]
         if let Some(child) = tray.as_mut() {
@@ -156,19 +237,78 @@ fn daemon(dir: PathBuf) -> Result<u8, String> {
                 tray = None;
             }
         }
-        match rx.recv_timeout(Duration::from_millis(500)) {
-            Ok((request, reply)) => {
-                let _ = reply.send(service.request(request));
+        while let Ok((request, reply)) = rx.try_recv() {
+            if tasks.len() >= 16 {
+                let _ = reply.send(Answer::Error {
+                    message: "agent busy".into(),
+                });
+                continue;
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(0),
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            let service = &service;
+            tasks.push(Box::pin(async move {
+                let _ = reply.send(service.request(request).await);
+            }));
         }
-        if Instant::now() >= next {
-            service.tick();
+        if Instant::now() >= next && !ticking.get() {
+            ticking.set(true);
+            let service = &service;
+            let ticking = &ticking;
+            tasks.push(Box::pin(async move {
+                service.tick().await;
+                ticking.set(false);
+            }));
             next = Instant::now() + Duration::from_millis(500);
         }
+        shuttli_runtime::poll_tasks(&mut tasks);
+        if service.stopping() {
+            break;
+        }
+        let wait = if ticking.get() {
+            Duration::from_millis(500)
+        } else {
+            next.saturating_duration_since(Instant::now())
+        };
+        std::thread::park_timeout(wait);
     }
+    // Stop accepting new clients, finish already-started effects and flush the
+    // quit reply before process exit. Preferences and login registration persist.
+    files::atomic_write(&dir.join("stopped"), b"explicit quit\n")?;
+    std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !tasks.is_empty() && Instant::now() < deadline {
+        while let Ok((_, reply)) = rx.try_recv() {
+            let _ = reply.send(Answer::Error {
+                message: "agent is stopping".into(),
+            });
+        }
+        shuttli_runtime::poll_tasks(&mut tasks);
+        std::thread::park_timeout(Duration::from_millis(10));
+    }
+    drop(tasks);
+    let mut cleanup: Vec<shuttli_runtime::Task<'_>> = vec![Box::pin(async {
+        if let Err(error) = service.cleanup().await {
+            eprintln!("history cleanup: {error}");
+        }
+    })];
+    while (!cleanup.is_empty() || connections.load(std::sync::atomic::Ordering::SeqCst) != 0)
+        && Instant::now() < deadline
+    {
+        while let Ok((_, reply)) = rx.try_recv() {
+            let _ = reply.send(Answer::Error {
+                message: "agent is stopping".into(),
+            });
+        }
+        shuttli_runtime::poll_tasks(&mut cleanup);
+        std::thread::park_timeout(Duration::from_millis(10));
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(mut child) = tray {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    Ok(0)
 }
+
 #[cfg(target_os = "linux")]
 fn start_tray(dir: &std::path::Path) -> Result<std::process::Child, String> {
     write_locale_assets(dir)?;
@@ -190,6 +330,10 @@ fn start_tray(dir: &std::path::Path) -> Result<std::process::Child, String> {
 }
 #[cfg(target_os = "linux")]
 fn write_locale_assets(dir: &std::path::Path) -> Result<(), String> {
+    files::atomic_write(
+        &dir.join("control_client.py"),
+        shuttli_native_ui::CONTROL_CLIENT.as_bytes(),
+    )?;
     files::atomic_write(
         &dir.join("i18n.py"),
         shuttli_native_ui::I18N_CLIENT.as_bytes(),
@@ -221,10 +365,10 @@ fn ui() -> Result<u8, String> {
     };
     if matches!(
         remote.request(ControlRequest {
-            version: 1,
+            version: shuttli_api::control::VERSION,
             action: shuttli_api::control::Action::Status
         }),
-        Answer::Error { .. }
+        Answer::Error { .. } | Answer::Stopped
     ) {
         std::process::Command::new(&exe)
             .arg("daemon")

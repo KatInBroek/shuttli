@@ -15,7 +15,7 @@ from linux_hosts import Node
 
 
 def configure(node, settings):
-    request = json.dumps({'version': 1, 'action': {'command': 'configure', 'settings': settings}})
+    request = json.dumps({'version': 2, 'action': {'command': 'configure', 'expected': node.api('settings')['settings'], 'settings': settings}})
     code = """import json,os,socket,sys
 s=socket.socket(socket.AF_UNIX);s.settimeout(15)
 s.connect(os.environ['SHUTTLI_DATA_DIR']+'/control.sock')
@@ -125,7 +125,6 @@ def main():
                     time.sleep(.5)
                 n.api('peer', target.identity, 'send', 'on')
                 n.api('peer', target.identity, 'receive', 'on')
-                n.api('peer', target.identity, 'blocked', 'off')
             n.api('set', 'automatic', 'on')
         record('three-node broadcast without echo', broadcast)
         record('unauthorized recipient is not reached through an allowed peer', no_relay)

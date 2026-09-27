@@ -5,9 +5,9 @@ import base64
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import hashlib
+from control_client import request as control_request
 import json
 from pathlib import Path
-import socket
 import sys
 from i18n import Translator, LANGUAGES
 from ui_model import DEFAULT_POLICY, group_history, peer_name, allowed_count
@@ -177,9 +177,10 @@ class Window(Gtk.ApplicationWindow):
             current = self.request({'command': 'settings'})
             if current['type'] == 'error':
                 return current
-            settings = current['settings']
+            expected = current['settings']
+            settings = dict(expected)
             settings.update(action['values'])
-            return self.request({'command': 'configure', 'settings': settings})
+            return self.request({'command': 'configure', 'expected': expected, 'settings': settings})
         if action['command'] == '_history':
             entries = []
             for offset in range(0, 10000, 100):
@@ -190,21 +191,7 @@ class Window(Gtk.ApplicationWindow):
                 if len(answer['entries']) < 100:
                     break
             return {'type': 'history', 'entries': entries}
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stream:
-            stream.settimeout(12)
-            stream.connect(self.path)
-            stream.sendall(json.dumps({'version': 1, 'action': action}).encode())
-            stream.shutdown(socket.SHUT_WR)
-            chunks, total = [], 0
-            while True:
-                chunk = stream.recv(65536)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > 12 * 1024 * 1024:
-                    raise ValueError('Response exceeds limit')
-                chunks.append(chunk)
-            return json.loads(b''.join(chunks))
+        return control_request(self.path, action)
 
     def call(self, action, callback=None, *, quiet=False, guarded=True):
         generation = self.generation
@@ -242,6 +229,9 @@ class Window(Gtk.ApplicationWindow):
             self.polling = True
             def updated(answer):
                 self.polling = False
+                if answer['type'] == 'stopped':
+                    self.close()
+                    return
                 if answer['type'] != 'status':
                     self.service_available = False
                     self.summary_directions.set_text(self.t('common.unavailable'))
@@ -298,7 +288,7 @@ class Window(Gtk.ApplicationWindow):
             widget.set_sensitive(False)
             if policy is not None:
                 new = dict(policy, **{key: desired})
-                action = {'command': 'peer', 'id': peer['id'], 'policy': new}
+                action = {'command': 'peer', 'id': peer['id'], 'expected': dict(policy), 'policy': new}
             elif key in ('send', 'receive'):
                 action = {'command': 'set_directions', key: desired}
             else:
@@ -404,7 +394,7 @@ class Window(Gtk.ApplicationWindow):
                 button.set_child(box)
                 state = self.t('devices.online' if peer['online'] else 'devices.offline')
                 title = peer['name'] + '   ·   ' + state
-                directions = self.t('setting.blocked') if policy['blocked'] else self.t('status.directions', send=self.t('common.on' if policy['send'] else 'common.off'), receive=self.t('common.on' if policy['receive'] else 'common.off'))
+                directions = self.t('status.directions', send=self.t('common.on' if policy['send'] else 'common.off'), receive=self.t('common.on' if policy['receive'] else 'common.off'))
                 self.row(box, title, peer['id'][:12] + ' · ' + directions, Gtk.Image.new_from_icon_name('go-next-symbolic'))
                 button.connect('clicked', lambda _, peer=peer: self.open_device(peer))
                 group.append(button)
@@ -429,14 +419,14 @@ class Window(Gtk.ApplicationWindow):
             self.toggle(group, 'send', self.t('ui.send_hint'), policy=policy, peer=peer)
             self.toggle(group, 'receive', self.t('ui.receive_hint'), policy=policy, peer=peer)
             group = self.group(self.t('ui.content_types'))
-            for key in ('text', 'png', 'quiet', 'blocked'):
+            for key in ('text', 'png', 'quiet'):
                 self.toggle(group, key, policy=policy, peer=peer)
             modes = ['inherit', 'off', 'status', 'content']
             chooser = Gtk.DropDown.new_from_strings([self.t('history.mode.' + mode) for mode in modes])
             chooser.set_selected(modes.index(policy.get('history') or 'inherit'))
             def changed(widget, *_):
-                policy['history'] = None if widget.get_selected() == 0 else modes[widget.get_selected()]
-                self.call({'command': 'peer', 'id': peer['id'], 'policy': dict(policy)}, lambda _: self.navigate('device'))
+                new = dict(policy, history=None if widget.get_selected() == 0 else modes[widget.get_selected()])
+                self.call({'command': 'peer', 'id': peer['id'], 'expected': dict(policy), 'policy': new}, lambda _: self.navigate('device'))
             chooser.connect('notify::selected', changed)
             self.row(self.group(), self.t('devices.history'), control=chooser)
         self.call({'command': 'devices'}, render)
@@ -468,7 +458,7 @@ class Window(Gtk.ApplicationWindow):
             box.append(check)
             return check
         self.dialog(self.t('ui.allow_title'), self.t('ui.allow'), build,
-                    lambda: self.call({'command': 'peer', 'id': peer['id'], 'policy': dict(policy, send=True)}, lambda _: self.navigate('device')))
+                    lambda: self.call({'command': 'peer', 'id': peer['id'], 'expected': dict(policy), 'policy': dict(policy, send=True)}, lambda _: self.navigate('device')))
 
     def history(self):
         def peers_ready(answer):
@@ -633,16 +623,16 @@ class Window(Gtk.ApplicationWindow):
             start.set_sensitive(False)
             self.row(group, self.t('ui.start_login'), self.t('status.close_hint'), start)
             def loaded(answer):
-                if answer['type'] != 'done':
+                if answer['type'] != 'autostart':
                     return
-                start.set_active(answer['message'].startswith('enabled'))
+                start.set_active(answer['status']['state'] == 'enabled')
                 start.set_sensitive(True)
                 def change(widget, *_):
                     desired = widget.get_active()
                     widget.set_sensitive(False)
                     def saved(answer):
                         widget.handler_block(handler)
-                        widget.set_active(desired if answer['type'] != 'error' else not desired)
+                        widget.set_active(answer['status']['state'] == 'enabled' if answer['type'] == 'autostart' else not desired)
                         widget.handler_unblock(handler)
                         widget.set_sensitive(True)
                     self.call({'command': 'autostart', 'enabled': desired}, saved)

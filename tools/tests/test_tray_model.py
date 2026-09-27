@@ -23,6 +23,7 @@ class TrayModelTests(unittest.TestCase):
                 self.assertEqual(items[20], (True, state.send))
                 self.assertEqual(items[21], (True, state.receive))
                 self.assertEqual(items[30][0], state.send)
+                self.assertEqual(state.action(40), {'command': 'quit'})
                 self.assertEqual(state.action(20), {'command': 'set_directions', 'send': not state.send})
                 self.assertEqual(state.action(21), {'command': 'set_directions', 'receive': not state.receive})
                 self.assertEqual(state.action(30), {'command': 'send'} if state.send else None)
@@ -31,7 +32,7 @@ class TrayModelTests(unittest.TestCase):
         state = TrayState.from_answer({'type': 'error', 'message': 'offline'})
         items = {i: enabled for i, _, enabled, _ in state.menu()}
         self.assertTrue(items[10])
-        for ident in (20, 21, 30):
+        for ident in (20, 21, 30, 40):
             self.assertFalse(items[ident])
             self.assertIsNone(state.action(ident))
         self.assertIsNone(state.action(999))
@@ -63,6 +64,7 @@ class TraySchedulingTests(unittest.TestCase):
         tray.busy = True
         tray.pending_directions = {}
         tray.pending_send = False
+        tray.pending_quit = False
         for _ in range(100):
             tray.update({'command': 'set_directions', 'send': False})
             tray.update({'command': 'set_directions', 'receive': False})
@@ -80,3 +82,11 @@ class TraySchedulingTests(unittest.TestCase):
         tray.update.reset_mock()
         tray.updated(answer, '')
         tray.update.assert_not_called()
+        tray.busy = True
+        module.Tray.update(tray, {'command': 'quit'})
+        module.Tray.update(tray, {'command': 'send'})
+        self.assertTrue(tray.pending_quit)
+        tray.updated(answer, '')
+        tray.update.assert_called_once_with({'command': 'quit'})
+        self.assertFalse(tray.pending_send)
+        self.assertFalse(tray.pending_directions)

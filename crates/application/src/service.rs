@@ -1,168 +1,273 @@
-//! Sync use cases. All presentation clients share this service.
+//! Shared use cases. Core decisions stay serial; port effects yield to controls.
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use shuttli_api::control::*;
 use shuttli_core::sync::SyncCore;
 use shuttli_model::sync::*;
-use shuttli_ports::sync::*;
+use shuttli_ports::{sync::*, worker::Port};
+use std::{
+    cell::{Cell, RefCell},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
-pub struct Service {
+struct State {
     core: SyncCore,
-    clipboard: Box<dyn Clipboard>,
-    store: Box<dyn Store>,
+    settings: Settings,
+    peers: Vec<PeerInfo>,
     network: Box<dyn Network>,
-    platform: Box<dyn Platform>,
-    device: String,
     last_error: Option<String>,
     available: bool,
     sequence: u64,
+    configuration: u64,
+    configuring: bool,
+}
+pub struct Service {
+    state: RefCell<State>,
+    clipboard: Port<dyn Clipboard>,
+    store: Port<dyn Store>,
+    platform: Port<dyn Platform>,
+    device: String,
+    description: String,
+    busy: Cell<bool>,
+    stopping: Cell<bool>,
+    generation: Arc<AtomicU64>,
+}
+struct Busy<'a>(&'a Cell<bool>);
+impl Drop for Busy<'_> {
+    fn drop(&mut self) {
+        self.0.set(false);
+    }
 }
 impl Service {
-    pub fn new(
+    pub async fn new(
         id: DeviceId,
         epoch: [u8; 16],
-        clipboard: Box<dyn Clipboard>,
-        store: Box<dyn Store>,
-        network: Box<dyn Network>,
-        platform: Box<dyn Platform>,
+        clipboard: Port<dyn Clipboard>,
+        store: Port<dyn Store>,
+        mut network: Box<dyn Network>,
+        platform: Port<dyn Platform>,
     ) -> Result<Self> {
-        let settings = store.settings()?;
-        let mut core = SyncCore::new(id, epoch, settings);
-        for p in store.peers()? {
-            core.register(parse_id(&p.id)?, p.id)
+        let (settings, peers, pending) = store
+            .call(|s| Ok((s.settings()?, s.peers()?, s.pending_receipts()?)))
+            .await?;
+        let mut core = SyncCore::new(id, epoch, settings.clone());
+        for p in &peers {
+            core.register(parse_id(&p.id)?, p.id.clone())
                 .map_err(|e| format!("{e:?}"))?;
         }
-        let mut service = Self {
-            core,
+        network.policy_revision(core.revision());
+        let description = clipboard.call(|c| Ok(c.description().to_owned())).await?;
+        let observed = clipboard.call(|c| c.read()).await;
+        let (available, last_error) = match observed {
+            Ok(v) => {
+                core.baseline(Some(v.stamp));
+                (true, None)
+            }
+            Err(e) => (false, Some(e)),
+        };
+        for (event, peer) in pending.into_iter().take(16) {
+            let _ = network.reconcile(parse_id(&peer)?, event);
+        }
+        Ok(Self {
+            state: RefCell::new(State {
+                core,
+                settings,
+                peers,
+                network,
+                available,
+                last_error,
+                sequence: 0,
+                configuration: 0,
+                configuring: false,
+            }),
             clipboard,
             store,
-            network,
             platform,
             device: format_id(id),
-            last_error: None,
-            available: false,
-            sequence: 0,
-        };
-        service.network.policy_revision(service.core.revision());
-        match service.clipboard.read() {
-            Ok(v) => {
-                service.core.baseline(Some(v.stamp));
-                service.available = true;
-            }
-            Err(e) => service.last_error = Some(e),
-        }
-        // Query only our own interrupted deliveries. Never resend their bodies.
-        for (event, peer) in service.store.pending_receipts()?.into_iter().take(16) {
-            let _ = service.network.reconcile(parse_id(&peer)?, event);
-        }
-        Ok(service)
+            description,
+            busy: Cell::new(false),
+            stopping: Cell::new(false),
+            generation: Arc::new(AtomicU64::new(0)),
+        })
     }
-    pub fn tick(&mut self) {
-        self.observe();
+    fn enter(&self) -> Result<Busy<'_>> {
+        if self.busy.replace(true) {
+            return Err("operation in progress; retry shortly".into());
+        }
+        Ok(Busy(&self.busy))
+    }
+    fn current(&self, generation: u64) -> Result<()> {
+        if self.generation.load(Ordering::SeqCst) != generation {
+            Err("operation cancelled by settings change".into())
+        } else {
+            Ok(())
+        }
+    }
+    pub fn stopping(&self) -> bool {
+        self.stopping.get()
+    }
+    pub async fn cleanup(&self) -> Result<()> {
+        self.store.call(|s| s.clear()).await
+    }
+    pub async fn tick(&self) {
+        if self.stopping.get() {
+            return;
+        }
+        let Ok(_busy) = self.enter() else {
+            return;
+        };
+        if self.state.borrow().configuring {
+            return;
+        }
+        // Drain outcomes before clipboard reads so a slow capture cannot starve receipts.
         for _ in 0..32 {
-            let Some(event) = self.network.poll() else {
+            let event = self.state.borrow_mut().network.poll();
+            let Some(event) = event else {
                 break;
             };
-            if let Err(e) = self.network_event(event) {
-                self.last_error = Some(e)
+            if let Err(error) = self.network_event(event).await {
+                self.state.borrow_mut().last_error = Some(error);
             }
         }
+        self.observe().await;
     }
-    fn observe(&mut self) {
-        match self.clipboard.read() {
+    async fn observe(&self) {
+        let generation = self.generation.load(Ordering::SeqCst);
+        let result = self.clipboard.call(|c| c.read()).await;
+        if self.current(generation).is_err() || self.state.borrow().configuring {
+            return;
+        }
+        match result {
             Ok(v) => {
-                self.available = true;
+                self.state.borrow_mut().available = true;
                 if let Some(p) = v.payload {
-                    match self.core.observe_local(v.stamp, &p.meta) {
+                    let result = self.state.borrow_mut().core.observe_local(v.stamp, &p.meta);
+                    match result {
                         Ok(observation) => {
                             if let Some(event) = observation.local_event {
-                                match self.store.record(
-                                    event,
-                                    &self.device,
-                                    "local",
-                                    DeliveryState::Applied,
-                                    &p,
-                                    "Local clipboard copy",
-                                ) {
-                                    Ok(id) if id != 0 => self.sequence += 1,
+                                let peer = self.device.clone();
+                                let payload = p.clone();
+                                match self
+                                    .store
+                                    .call(move |s| {
+                                        s.record(
+                                            event,
+                                            &peer,
+                                            "local",
+                                            DeliveryState::Applied,
+                                            &payload,
+                                            "Local clipboard copy",
+                                        )
+                                    })
+                                    .await
+                                {
+                                    Ok(id) if id != 0 => self.state.borrow_mut().sequence += 1,
                                     Ok(_) => {}
-                                    Err(e) => self.last_error = Some(e),
+                                    Err(e) => self.state.borrow_mut().last_error = Some(e),
                                 }
                             }
-                            if let Err(e) =
-                                self.publish(observation.publications, p, "automatic observation")
+                            if let Err(e) = self
+                                .publish(observation.publications, p, "automatic observation")
+                                .await
                             {
-                                self.last_error = Some(e)
+                                self.state.borrow_mut().last_error = Some(e);
                             }
                         }
                         Err(
                             shuttli_core::sync::Rejection::Disabled
                             | shuttli_core::sync::Rejection::Sensitive,
                         ) => {}
-                        Err(e) => self.last_error = Some(format!("{e:?}")),
+                        Err(e) => self.state.borrow_mut().last_error = Some(format!("{e:?}")),
                     }
                 } else {
-                    self.core.baseline(Some(v.stamp));
+                    self.state.borrow_mut().core.baseline(Some(v.stamp));
                 }
             }
             Err(e) => {
-                self.available = false;
-                self.core.baseline(None);
-                self.last_error = Some(e);
+                let mut state = self.state.borrow_mut();
+                state.available = false;
+                state.core.baseline(None);
+                state.last_error = Some(e);
             }
         }
     }
-    fn publish(
-        &mut self,
+    async fn publish(
+        &self,
         permits: Vec<shuttli_core::sync::Publication>,
-        p: Payload,
+        payload: Payload,
         reason: &str,
     ) -> Result<usize> {
-        let count = permits.len();
+        let mut count = 0;
         for permit in permits {
             let event = permit.event();
             let target = format_id(permit.target());
-            self.store.record(
-                event,
-                &target,
-                "send",
-                DeliveryState::Sending,
-                &p,
-                &format!("{reason}; awaiting remote OS readback"),
-            )?;
-            if let Err(e) = self.network.send(permit, p.clone()) {
+            let peer = target.clone();
+            let p = payload.clone();
+            let detail = format!("{reason}; awaiting remote OS readback");
+            self.store
+                .call(move |s| s.record(event, &peer, "send", DeliveryState::Sending, &p, &detail))
+                .await?;
+            // Persistence yields: recheck authority immediately before enqueueing content.
+            let result = {
+                let mut state = self.state.borrow_mut();
+                if !state.core.may_send(&permit) {
+                    Err((DeliveryState::Cancelled, "send permission changed".into()))
+                } else {
+                    state
+                        .network
+                        .send(permit, payload.clone())
+                        .map_err(|e| (DeliveryState::Failed, e))
+                }
+            };
+            if let Err((state, e)) = result {
                 self.store
-                    .update(event, &target, DeliveryState::Failed, &e)?;
+                    .call(move |s| s.update(event, &target, state, &e))
+                    .await?;
+            } else {
+                count += 1;
             }
         }
         if count > 0 {
-            self.sequence += 1;
+            self.state.borrow_mut().sequence += 1;
             self.notify("Sending clipboard", &format!("{count} device(s)"), None);
         }
         Ok(count)
     }
-    fn network_event(&mut self, event: NetworkEvent) -> Result<()> {
+    async fn network_event(&self, event: NetworkEvent) -> Result<()> {
         match event {
             NetworkEvent::ReceiptQuery { peer, event, reply } => {
                 let result = if peer == event.origin {
-                    self.store.receipt(event)
+                    self.store.call(move |s| s.receipt(event)).await
                 } else {
                     Err("receipt query is not owned by this peer".into())
                 };
                 let _ = reply.send(result);
             }
-
-            NetworkEvent::Peer(p) => {
-                let known = self.store.peers()?.iter().any(|x| x.id == p.id);
-                self.core
-                    .register(parse_id(&p.id)?, p.id.clone())
-                    .map_err(|e| format!("{e:?}"))?;
-                self.store.peer(&p)?;
+            NetworkEvent::Peer(peer) => {
+                let p = peer.clone();
+                self.store.call(move |s| s.peer(&p)).await?;
+                let known = {
+                    let mut state = self.state.borrow_mut();
+                    state
+                        .core
+                        .register(parse_id(&peer.id)?, peer.id.clone())
+                        .map_err(|e| format!("{e:?}"))?;
+                    if let Some(old) = state.peers.iter_mut().find(|p| p.id == peer.id) {
+                        *old = peer.clone();
+                        true
+                    } else {
+                        state.peers.push(peer.clone());
+                        state.sequence += 1;
+                        false
+                    }
+                };
                 if !known {
-                    self.sequence += 1;
                     self.notify(
                         "Device discovered",
                         "Outgoing sync is disabled until you allow this device",
-                        Some(&p.id),
+                        Some(&peer.id),
                     );
                 }
             }
@@ -172,33 +277,47 @@ impl Service {
                 meta,
                 reply,
             } => {
-                let result = (|| {
+                let result = async {
                     let ticket = self
+                        .state
+                        .borrow()
                         .core
                         .receive(peer, event, meta)
                         .map_err(|e| format!("receive rejected: {e:?}"))?;
-                    if !self.store.reserve(event)? {
-                        return Err("duplicate or stale event; no clipboard reapplication".into());
+                    let payload = Payload {
+                        meta: ticket.metadata().clone(),
+                        data: Arc::from([]),
+                    };
+                    self.store
+                        .call(move |s| {
+                            if !s.reserve(event)? {
+                                return Err(
+                                    "duplicate or stale event; no clipboard reapplication".into()
+                                );
+                            }
+                            s.record(
+                                event,
+                                &format_id(peer),
+                                "receive",
+                                DeliveryState::Receiving,
+                                &payload,
+                                "receiving content",
+                            )?;
+                            Ok(())
+                        })
+                        .await?;
+                    if ticket.policy_revision() != self.state.borrow().core.revision() {
+                        return Err("receive permission changed".into());
                     }
-                    self.store.record(
-                        event,
-                        &format_id(peer),
-                        "receive",
-                        DeliveryState::Receiving,
-                        &Payload {
-                            meta: ticket.metadata().clone(),
-                            data: std::sync::Arc::from([]),
-                        },
-                        "receiving content",
-                    )?;
-                    self.sequence += 1;
+                    self.state.borrow_mut().sequence += 1;
                     self.notify(
                         "Receiving clipboard",
                         "Transfer in progress",
                         Some(&format_id(peer)),
                     );
                     Ok(ticket)
-                })();
+                }
+                .await;
                 let _ = reply.send(result);
             }
             NetworkEvent::Received {
@@ -206,52 +325,84 @@ impl Service {
                 payload,
                 reply,
             } => {
-                let result = (|| {
-                    let current = self.clipboard.read()?;
-                    self.core
+                let event = ticket.event();
+                let peer = format_id(event.origin);
+                let result: Result<()> = async {
+                    let generation = self.generation.load(Ordering::SeqCst);
+                    let current = self.clipboard.call(|c| c.read()).await?;
+                    self.state
+                        .borrow()
+                        .core
                         .may_apply(&ticket, current.stamp)
                         .map_err(|e| format!("receive cancelled: {e:?}"))?;
-                    self.store.intent(ticket.event())?;
-                    let value = match self.clipboard.write(
-                        &payload,
-                        self.core
-                            .authorize_apply(&ticket, current.stamp)
-                            .map_err(|e| format!("{e:?}"))?,
-                    ) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            self.core.baseline(None);
-                            return Err(e);
-                        }
-                    };
-                    self.core.written(value.stamp);
-                    self.store.record(
-                        ticket.event(),
-                        &format_id(ticket.event().origin),
-                        "receive",
-                        DeliveryState::Applied,
-                        &payload,
-                        "OS clipboard readback verified",
-                    )?;
-                    self.available = true;
-                    self.sequence += 1;
+                    self.store.call(move |s| s.intent(event)).await?;
+                    let authorization = self
+                        .state
+                        .borrow()
+                        .core
+                        .authorize_apply(&ticket, current.stamp)
+                        .map_err(|e| format!("{e:?}"))?;
+                    let p = payload.clone();
+                    let lease = self.generation.clone();
+                    let value = self
+                        .clipboard
+                        .call(move |c| {
+                            if lease.load(Ordering::SeqCst) != generation {
+                                return Err("receive permission changed".into());
+                            }
+                            c.write(&p, authorization)
+                        })
+                        .await?;
+                    // Even if a control arrived during OS readback, this write must
+                    // establish a baseline and retain its truthful durable receipt.
+                    self.state.borrow_mut().core.written(value.stamp);
+                    let p = payload.clone();
+                    let target = peer.clone();
+                    self.store
+                        .call(move |s| {
+                            s.record(
+                                event,
+                                &target,
+                                "receive",
+                                DeliveryState::Applied,
+                                &p,
+                                "OS clipboard readback verified",
+                            )
+                        })
+                        .await?;
+                    {
+                        let mut state = self.state.borrow_mut();
+                        state.available = true;
+                        state.sequence += 1;
+                    }
                     self.notify(
                         "Clipboard received",
                         "System clipboard readback verified",
-                        Some(&format_id(ticket.event().origin)),
+                        Some(&peer),
                     );
                     Ok(())
-                })();
+                }
+                .await;
                 if let Err(e) = &result {
-                    self.last_error = Some(e.clone());
-                    let _ = self.store.record(
-                        ticket.event(),
-                        &format_id(ticket.event().origin),
-                        "receive",
-                        DeliveryState::Failed,
-                        &payload,
-                        e,
-                    );
+                    {
+                        let mut state = self.state.borrow_mut();
+                        state.last_error = Some(e.clone());
+                        state.core.baseline(None);
+                    }
+                    let detail = e.clone();
+                    let _ = self
+                        .store
+                        .call(move |s| {
+                            s.record(
+                                event,
+                                &peer,
+                                "receive",
+                                DeliveryState::Failed,
+                                &payload,
+                                &detail,
+                            )
+                        })
+                        .await;
                 }
                 let _ = reply.send(result);
             }
@@ -261,8 +412,12 @@ impl Service {
                 state,
                 detail,
             } => {
-                self.store.update(event, &peer, state, &detail)?;
-                self.sequence += 1;
+                let target = peer.clone();
+                let message = detail.clone();
+                self.store
+                    .call(move |s| s.update(event, &target, state, &message))
+                    .await?;
+                self.state.borrow_mut().sequence += 1;
                 self.notify(
                     if state == DeliveryState::Applied {
                         "Clipboard sent"
@@ -276,164 +431,287 @@ impl Service {
         }
         Ok(())
     }
-    fn notify(&mut self, title: &str, body: &str, peer: Option<&str>) {
-        if self.core.settings().notifications
+    fn notify(&self, title: &str, body: &str, peer: Option<&str>) {
+        let state = self.state.borrow();
+        if state.settings.notifications
             && !peer
-                .and_then(|p| self.core.settings().peers.get(p))
+                .and_then(|p| state.settings.peers.get(p))
                 .is_some_and(|p| p.quiet)
         {
-            self.platform.notify(title, body);
+            let title = title.to_owned();
+            let body = body.to_owned();
+            // Notifications are optional and bounded independently of core work.
+            drop(self.platform.call(move |p| {
+                p.notify(&title, &body);
+                Ok(())
+            }));
         }
     }
-    fn configure(&mut self, s: Settings) -> Result<Answer> {
-        if !s.validate() {
+    async fn configure(&self, settings: Settings) -> Result<Answer> {
+        if !settings.validate() {
             return Err("invalid settings".into());
         }
-        if let Err(e) = self.store.save_settings(&s) {
-            self.core
+        let generation = {
+            let mut state = self.state.borrow_mut();
+            state.configuration = state
+                .configuration
+                .checked_add(1)
+                .ok_or("configuration exhausted")?;
+            self.generation.store(state.configuration, Ordering::SeqCst);
+            state.settings = settings.clone();
+            state.configuring = true;
+            // Revoke immediately, before waiting on disk or the clipboard worker.
+            // New permissions become effective only after durable save + baseline.
+            state
+                .core
                 .configure(Settings {
                     send: false,
                     receive: false,
-                    ..self.core.settings().clone()
+                    ..settings.clone()
                 })
                 .map_err(|e| format!("{e:?}"))?;
-            self.network.policy_revision(self.core.revision());
-            return Err(format!("settings not saved; synchronization stopped: {e}"));
+            let revision = state.core.revision();
+            state.network.policy_revision(revision);
+            state.sequence += 1;
+            state.configuration
+        };
+        let s = settings.clone();
+        let result = async {
+            self.store
+                .call(move |store| store.save_settings(&s))
+                .await?;
+            self.current(generation)?;
+            let observed = self.clipboard.call(|c| c.read()).await;
+            self.current(generation)?;
+            let mut state = self.state.borrow_mut();
+            state.core.baseline(observed.ok().map(|v| v.stamp));
+            state
+                .core
+                .configure(settings.clone())
+                .map_err(|e| format!("{e:?}"))?;
+            let revision = state.core.revision();
+            state.network.policy_revision(revision);
+            state.configuring = false;
+            state.sequence += 1;
+            Ok(Answer::Settings { settings })
         }
-        self.core
-            .configure(s.clone())
-            .map_err(|e| format!("{e:?}"))?;
-        self.network.policy_revision(self.core.revision());
-        // Reconfiguration never republishes the clipboard or queues a disabled interval.
-        match self.clipboard.read() {
-            Ok(v) => self.core.baseline(Some(v.stamp)),
-            Err(_) => self.core.baseline(None),
+        .await;
+        if let Err(error) = &result {
+            if self.current(generation).is_ok() {
+                let mut state = self.state.borrow_mut();
+                state.settings.send = false;
+                state.settings.receive = false;
+                state.configuring = false;
+                state.last_error = Some(format!(
+                    "settings not saved; synchronization stopped: {error}"
+                ));
+            }
         }
-        self.sequence += 1;
-        Ok(Answer::Settings { settings: s })
+        result
     }
-    fn action(&mut self, a: Action) -> Result<Answer> {
-        Ok(match a {
-            Action::Status => Answer::Status {
-                status: Status {
-                    device: self.device.clone(),
-                    clipboard: self.clipboard.description().into(),
-                    clipboard_available: self.available,
-                    last_error: self.last_error.clone(),
-                    settings: self.core.settings().clone(),
-                    policy_revision: self.core.revision(),
-                    sequence: self.sequence,
-                },
-            },
-            Action::Devices => Answer::Devices {
-                devices: self.store.peers()?,
-                settings: self.core.settings().clone(),
-            },
-            Action::Settings => Answer::Settings {
-                settings: self.core.settings().clone(),
-            },
-            Action::Configure { settings } => return self.configure(settings),
+    async fn action(&self, action: Action) -> Result<Answer> {
+        if self.stopping.get() {
+            return Err("agent is stopping".into());
+        }
+        if matches!(action, Action::Quit) {
+            self.stopping.set(true);
+            let mut state = self.state.borrow_mut();
+            state.configuration = state
+                .configuration
+                .checked_add(1)
+                .ok_or("configuration exhausted")?;
+            self.generation.store(state.configuration, Ordering::SeqCst);
+            let settings = Settings {
+                send: false,
+                receive: false,
+                ..state.settings.clone()
+            };
+            state
+                .core
+                .configure(settings)
+                .map_err(|e| format!("{e:?}"))?;
+            let revision = state.core.revision();
+            state.network.policy_revision(revision);
+            return Ok(done("Agent is stopping"));
+        }
+        // These commands can run while data effects are pending. RefCell borrows
+        // never span an await and the host polls all futures on one thread.
+        match action {
+            Action::Status => {
+                let s = self.state.borrow();
+                return Ok(Answer::Status {
+                    status: Status {
+                        device: self.device.clone(),
+                        clipboard: self.description.clone(),
+                        clipboard_available: s.available,
+                        last_error: s.last_error.clone(),
+                        settings: s.settings.clone(),
+                        policy_revision: s.core.revision(),
+                        sequence: s.sequence,
+                    },
+                });
+            }
+            Action::Settings => {
+                return Ok(Answer::Settings {
+                    settings: self.state.borrow().settings.clone(),
+                });
+            }
+            Action::Devices => {
+                let s = self.state.borrow();
+                return Ok(Answer::Devices {
+                    devices: s.peers.clone(),
+                    settings: s.settings.clone(),
+                });
+            }
+            Action::Configure { expected, settings } => {
+                if expected != self.state.borrow().settings {
+                    return Err("settings changed; refresh before retrying".into());
+                }
+                return self.configure(settings).await;
+            }
             Action::SetDirections { send, receive } => {
                 if send.is_none() && receive.is_none() {
                     return Err("at least one direction is required".into());
                 }
-                let mut settings = self.core.settings().clone();
-                if let Some(value) = send {
-                    settings.send = value;
+                let mut settings = self.state.borrow().settings.clone();
+                if let Some(v) = send {
+                    settings.send = v;
                 }
-                if let Some(value) = receive {
-                    settings.receive = value;
+                if let Some(v) = receive {
+                    settings.receive = v;
                 }
-                return self.configure(settings);
+                return self.configure(settings).await;
             }
-            Action::Peer { id, policy } => {
+            Action::Peer {
+                id,
+                expected,
+                policy,
+            } => {
                 parse_id(&id)?;
-                if !self.store.peers()?.iter().any(|p| p.id == id) {
-                    return Err("unknown device; discover it first".into());
+                let mut settings = {
+                    let s = self.state.borrow();
+                    if !s.peers.iter().any(|p| p.id == id) {
+                        return Err("unknown device; discover it first".into());
+                    }
+                    s.settings.clone()
+                };
+                if settings.peers.get(&id).cloned().unwrap_or_default() != expected {
+                    return Err("device settings changed; refresh before retrying".into());
                 }
-                let mut s = self.core.settings().clone();
-                s.peers.insert(id, policy);
-                return self.configure(s);
+                settings.peers.insert(id, policy);
+                return self.configure(settings).await;
             }
             Action::Refresh => {
-                self.network.refresh();
-                done("Discovery refresh requested")
+                self.state.borrow_mut().network.refresh();
+                return Ok(done("Discovery refresh requested"));
             }
+            _ => {}
+        }
+        let _busy = self.enter()?;
+        if self.state.borrow().configuring {
+            return Err("settings update in progress".into());
+        }
+        let generation = self.generation.load(Ordering::SeqCst);
+        Ok(match action {
             Action::Send => {
-                let v = self.clipboard.read()?;
+                let v = self.clipboard.call(|c| c.read()).await?;
+                self.current(generation)?;
                 let p = v.payload.ok_or("clipboard has no supported content")?;
                 let permits = self
+                    .state
+                    .borrow_mut()
                     .core
                     .manual(v.stamp, &p.meta)
                     .map_err(|e| format!("{e:?}"))?;
-                let n = self.publish(permits, p, "explicit user command")?;
+                let n = self.publish(permits, p, "explicit user command").await?;
                 done(&format!("Queued for {n} allowed device(s)"))
             }
-            Action::History { offset, limit } => {
-                self.store.prune()?;
-                Answer::History {
-                    entries: self.store.history(offset, limit)?,
-                }
-            }
+            Action::History { offset, limit } => Answer::History {
+                entries: self
+                    .store
+                    .call(move |s| {
+                        s.prune()?;
+                        s.history(offset, limit)
+                    })
+                    .await?,
+            },
             Action::Preview { id } => {
-                let p = self.store.content(id)?;
+                let p = self.store.call(move |s| s.content(id)).await?;
                 Answer::Preview {
                     format: p.meta.format,
                     base64: STANDARD.encode(&p.data),
                 }
             }
             Action::Copy { id, local_only } => {
-                let p = self.store.content(id)?;
-                let current = self.clipboard.read()?;
-                let written = self.clipboard.write(
-                    &p,
-                    self.core
-                        .authorize_local_copy(current.stamp, p.meta.clone()),
-                )?;
-                self.core.written(written.stamp);
-                if !local_only && self.core.settings().automatic {
+                let p = self.store.call(move |s| s.content(id)).await?;
+                let current = self.clipboard.call(|c| c.read()).await?;
+                self.current(generation)?;
+                let authorization = self
+                    .state
+                    .borrow()
+                    .core
+                    .authorize_local_copy(current.stamp, p.meta.clone());
+                let payload = p.clone();
+                let lease = self.generation.clone();
+                let written = self
+                    .clipboard
+                    .call(move |c| {
+                        if lease.load(Ordering::SeqCst) != generation {
+                            return Err("copy cancelled by settings change".into());
+                        }
+                        c.write(&payload, authorization)
+                    })
+                    .await?;
+                self.state.borrow_mut().core.written(written.stamp);
+                self.current(generation)?;
+                if !local_only && self.state.borrow().settings.automatic {
                     let permits = self
+                        .state
+                        .borrow_mut()
                         .core
                         .manual(written.stamp, &p.meta)
                         .map_err(|e| format!("{e:?}"))?;
-                    self.publish(permits, p, "explicit user command")?;
+                    self.publish(permits, p, "explicit user command").await?;
                 }
                 done("Copied history content to the system clipboard")
             }
             Action::Resend { id } => {
-                let p = self.store.content(id)?;
+                let p = self.store.call(move |s| s.content(id)).await?;
+                self.current(generation)?;
                 let stamp = ClipboardStamp {
                     generation: 0,
                     digest: p.meta.digest,
                     sensitive: false,
                 };
                 let permits = self
+                    .state
+                    .borrow_mut()
                     .core
                     .manual(stamp, &p.meta)
                     .map_err(|e| format!("{e:?}"))?;
-                let n = self.publish(permits, p, "explicit user command")?;
+                let n = self.publish(permits, p, "explicit user command").await?;
                 done(&format!("History queued as a new event for {n} device(s)"))
             }
             Action::ClearHistory => {
-                self.store.clear()?;
-                self.sequence += 1;
+                self.store.call(|s| s.clear()).await?;
+                self.state.borrow_mut().sequence += 1;
                 done("History cleared; replay protection retained")
             }
-            Action::Autostart { enabled } => done(&self.platform.autostart(enabled)?),
+            Action::Autostart { enabled } => Answer::Autostart {
+                status: self.platform.call(move |p| p.autostart(enabled)).await?,
+            },
+            _ => unreachable!("control action handled above"),
         })
     }
-}
-impl ControlApi for Service {
-    fn request(&mut self, r: ControlRequest) -> Answer {
-        if r.version != VERSION {
+    pub async fn request(&self, request: ControlRequest) -> Answer {
+        if request.version != VERSION {
             return Answer::Error {
                 message: "unsupported API version".into(),
             };
         }
-        match self.action(r.action) {
-            Ok(a) => a,
-            Err(e) => Answer::Error { message: e },
-        }
+        self.action(request.action)
+            .await
+            .unwrap_or_else(|message| Answer::Error { message })
     }
 }
 fn done(message: &str) -> Answer {

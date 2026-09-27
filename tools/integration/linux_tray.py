@@ -94,7 +94,7 @@ def main():
         def directions():
             hashes = []
             for send, receive in [(True, True), (True, False), (False, True), (False, False)]:
-                n.api('request', json.dumps({'version': 1, 'action': {'command': 'set_directions', 'send': send, 'receive': receive}}))
+                n.api('request', json.dumps({'version': 2, 'action': {'command': 'set_directions', 'send': send, 'receive': receive}}))
                 wait(lambda: (props()['20']['toggle-state'], props()['21']['toggle-state']) == (int(send), int(receive)))
                 layout = props()
                 assert layout['30']['enabled'] == send
@@ -168,7 +168,7 @@ def main():
                 child.wait(timeout=5)
             if args.allow_clipboard_overwrite:
                 n.api('set','automatic','on' if original['automatic'] else 'off')
-            n.api('request',json.dumps({'version':1,'action':{'command':'set_directions','send':original['send'],'receive':original['receive']}}))
+            n.api('request',json.dumps({'version':2,'action':{'command':'set_directions','send':original['send'],'receive':original['receive']}}))
 
 
 if __name__ == '__main__':

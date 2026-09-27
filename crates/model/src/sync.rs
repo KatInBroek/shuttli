@@ -29,7 +29,6 @@ pub struct Metadata {
 pub struct PeerPolicy {
     pub send: bool,
     pub receive: bool,
-    pub blocked: bool,
     pub text: bool,
     pub png: bool,
     pub max_bytes: u64,
@@ -42,7 +41,6 @@ impl Default for PeerPolicy {
         Self {
             send: false,
             receive: true,
-            blocked: false,
             text: true,
             png: true,
             max_bytes: 8 * 1024 * 1024,
@@ -153,4 +151,19 @@ pub struct ClipboardStamp {
 
 fn default_history_memory_bytes() -> u64 {
     16 * 1024 * 1024
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutostartState {
+    Enabled,
+    Disabled,
+    RequiresUserAction,
+    Unavailable,
+    Unknown,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AutostartStatus {
+    pub state: AutostartState,
+    pub message: String,
 }

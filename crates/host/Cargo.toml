@@ -20,6 +20,7 @@ shuttli-adapters.workspace = true
 shuttli-runtime.workspace = true
 shuttli-cli.workspace = true
 
+shuttli-model.workspace = true
 shuttli-api.workspace = true
 shuttli-ports.workspace = true
 serde_json.workspace = true

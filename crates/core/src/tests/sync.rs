@@ -160,14 +160,13 @@ fn permission_and_format_matrix_is_checked_for_both_send_and_receive() {
     for format in [Format::Text, Format::Png] {
         for send in [false, true] {
             // Each independent deny condition must beat otherwise valid settings.
-            for denied in 0..7 {
+            for denied in 1..7 {
                 let mut e = engine();
                 let mut s = e.settings().clone();
                 let mut m = meta(1);
                 m.format = format;
                 let p = s.peers.get_mut("B").unwrap();
                 match denied {
-                    0 => p.blocked = true,
                     1 if send => s.send = false,
                     1 => s.receive = false,
                     2 if send => p.send = false,

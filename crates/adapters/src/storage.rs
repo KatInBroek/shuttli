@@ -21,6 +21,37 @@ fn parsed<T: serde::de::DeserializeOwned>(v: &str) -> Result<T> {
     serde_json::from_str(v).map_err(err)
 }
 
+// Compatibility is confined to persisted data, never exposed as an API feature.
+fn decode_settings(bytes: &[u8]) -> Result<(Settings, bool)> {
+    let mut value: serde_json::Value = serde_json::from_slice(bytes).map_err(err)?;
+    let mut migrated = false;
+    if let Some(peers) = value
+        .get_mut("peers")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for policy in peers.values_mut() {
+            if let Some(fields) = policy.as_object_mut() {
+                if let Some(blocked) = fields.remove("blocked") {
+                    migrated = true;
+                    match blocked.as_bool() {
+                        Some(true) => {
+                            fields.insert("send".into(), false.into());
+                            fields.insert("receive".into(), false.into());
+                        }
+                        Some(false) => {}
+                        None => return Err("invalid legacy device policy".into()),
+                    }
+                }
+            }
+        }
+    }
+    let settings: Settings = serde_json::from_value(value).map_err(err)?;
+    if !settings.validate() {
+        return Err("invalid settings".into());
+    }
+    Ok((settings, migrated))
+}
+
 pub struct SqlStore {
     db: Connection,
     dir: PathBuf,
@@ -67,13 +98,10 @@ PRAGMA wal_checkpoint(TRUNCATE);"#).map_err(err)?;
         )
         .map_err(err)?;
         let settings_path = dir.join("settings.json");
-        let mut settings = match std::fs::read(settings_path) {
-            Ok(bytes) => serde_json::from_slice::<Settings>(&bytes)
-                .ok()
-                .filter(Settings::validate)
-                .unwrap_or_else(Settings::closed),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Settings::default(),
-            Err(_) => Settings::closed(),
+        let (mut settings, migrated) = match std::fs::read(settings_path) {
+            Ok(bytes) => decode_settings(&bytes).unwrap_or_else(|_| (Settings::closed(), false)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Settings::default(), false),
+            Err(_) => (Settings::closed(), false),
         };
         let pending: bool = db
             .query_row("SELECT pending FROM settings_guard WHERE id=1", [], |r| {
@@ -96,6 +124,9 @@ PRAGMA wal_checkpoint(TRUNCATE);"#).map_err(err)?;
             store.peer(&peer)?;
         }
         store.prune()?;
+        if migrated {
+            store.save_settings(&store.settings.clone())?;
+        }
         Ok(store)
     }
 }
@@ -797,5 +828,64 @@ mod session_history_tests {
         assert_eq!(table_count, 0);
         drop(s);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod policy_migration_tests {
+    use super::*;
+    #[test]
+    fn legacy_block_migrates_to_both_directions_off_and_is_removed_from_disk() {
+        for blocked in [false, true] {
+            let dir = std::env::temp_dir().join(format!(
+                "shuttli-policy-{:?}",
+                crate::random_epoch().unwrap()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let mut original = Settings::default();
+            let id = "02".repeat(32);
+            original.peers.insert(
+                id.clone(),
+                PeerPolicy {
+                    send: true,
+                    quiet: true,
+                    ..PeerPolicy::default()
+                },
+            );
+            let mut legacy = serde_json::to_value(&original).unwrap();
+            legacy["peers"][&id]["blocked"] = blocked.into();
+            std::fs::write(
+                dir.join("settings.json"),
+                serde_json::to_vec(&legacy).unwrap(),
+            )
+            .unwrap();
+            let migrated = SqlStore::open(&dir).unwrap().settings().unwrap();
+            assert_eq!(migrated.send, original.send);
+            assert_eq!(migrated.receive, original.receive);
+            assert_eq!(migrated.peers[&id].send, !blocked);
+            assert_eq!(migrated.peers[&id].receive, !blocked);
+            assert!(migrated.peers[&id].quiet);
+            let saved = std::fs::read(dir.join("settings.json")).unwrap();
+            assert!(!String::from_utf8_lossy(&saved).contains("blocked"));
+            assert_eq!(
+                serde_json::from_slice::<Settings>(&saved).unwrap(),
+                migrated
+            );
+            assert_eq!(SqlStore::open(&dir).unwrap().settings().unwrap(), migrated);
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+    #[test]
+    fn malformed_legacy_policy_cannot_silently_enable_a_device() {
+        let mut settings = Settings::default();
+        settings
+            .peers
+            .insert("02".repeat(32), PeerPolicy::default());
+        let mut value = serde_json::to_value(settings).unwrap();
+        value["peers"]["02".repeat(32)]["blocked"] = "true".into();
+        assert!(decode_settings(&serde_json::to_vec(&value).unwrap()).is_err());
+        // The live API accepts only the new policy, with no hidden blocking flag.
+        value["peers"]["02".repeat(32)]["blocked"] = false.into();
+        assert!(serde_json::from_value::<Settings>(value).is_err());
     }
 }
