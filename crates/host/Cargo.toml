@@ -1,0 +1,31 @@
+[package]
+name = "shuttli-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[package.metadata.shuttli]
+layer = "host"
+
+[lints]
+workspace = true
+
+[dependencies]
+shuttli-brand.workspace = true
+shuttli-application.workspace = true
+shuttli-adapters.workspace = true
+shuttli-runtime.workspace = true
+shuttli-cli.workspace = true
+
+shuttli-api.workspace = true
+shuttli-ports.workspace = true
+serde_json.workspace = true
+
+shuttli-native-ui.workspace = true
+
+[[bin]]
+name = "shuttli"
+path = "src/main.rs"

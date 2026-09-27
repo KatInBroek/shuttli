@@ -1,0 +1,18 @@
+[package]
+name = "shuttli-model"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[package.metadata.shuttli]
+layer = "value"
+
+[lints]
+workspace = true
+
+[dependencies]
+
+serde.workspace = true

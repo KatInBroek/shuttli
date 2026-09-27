@@ -1,0 +1,9 @@
+/target/
+__pycache__/
+*.pyc
+
+# Local environment details and run evidence stay outside version control.
+/docs/validation/
+/.local/
+/project-memory/
+*local-hosts*.json

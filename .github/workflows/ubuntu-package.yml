@@ -1,0 +1,41 @@
+name: Ubuntu package
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential dpkg-dev python3 desktop-file-utils
+          rustup toolchain install stable --profile minimal
+      - name: Build from locked dependencies
+        run: |
+          export RUSTFLAGS="--remap-path-prefix=$GITHUB_WORKSPACE=/src --remap-path-prefix=$HOME=/builder"
+          cargo build --release --locked -p shuttli-host
+          python3 tools/package_deb.py
+      - name: Inspect payload and repeat packaging
+        run: |
+          python3 tools/integration/deb_package.py target/packages/*.deb
+          python3 tools/package_deb.py --output target/repeated-package
+          cmp target/packages/*.deb target/repeated-package/*.deb
+      - name: Install and verify desktop dependencies
+        run: |
+          sudo apt-get install -y ./target/packages/*.deb
+          shuttli --help
+          desktop-file-validate /usr/share/applications/org.shuttli.Control.desktop
+          /usr/bin/python3 -c "import gi; gi.require_version('Gtk', '4.0'); from gi.repository import Gtk, Gio, Gdk"
+          sudo apt-get remove -y shuttli
+          test ! -e /usr/bin/shuttli
+      - name: Upload preview package and provenance
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ubuntu-24.04-amd64-preview
+          path: target/packages/*
+          if-no-files-found: error

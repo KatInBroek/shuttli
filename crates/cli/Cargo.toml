@@ -1,0 +1,22 @@
+[package]
+name = "shuttli-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[package.metadata.shuttli]
+layer = "ui"
+
+[lints]
+workspace = true
+
+[dependencies]
+shuttli-brand.workspace = true
+shuttli-api.workspace = true
+
+serde_json.workspace = true
+
+shuttli-model.workspace = true

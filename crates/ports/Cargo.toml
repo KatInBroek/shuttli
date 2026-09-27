@@ -1,0 +1,19 @@
+[package]
+name = "shuttli-ports"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[package.metadata.shuttli]
+layer = "ports"
+
+[lints]
+workspace = true
+
+[dependencies]
+shuttli-model.workspace = true
+
+shuttli-core.workspace = true
