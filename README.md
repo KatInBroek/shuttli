@@ -6,9 +6,9 @@ Peer-to-peer clipboard sync with per-device permissions and verified delivery.
 
 ## Download
 
-**[Download for Ubuntu 24.04+ · Intel/AMD 64-bit (.deb)](https://github.com/KatInBroek/shuttli/releases/download/v0.1.0-preview.1/shuttli_0.1.0_amd64.deb)**
+**[Download for Ubuntu 24.04+ · Intel/AMD 64-bit (.deb)](https://github.com/KatInBroek/shuttli/releases)**
 
-[Release notes and checksums](https://github.com/KatInBroek/shuttli/releases/tag/v0.1.0-preview.1) · [All releases](https://github.com/KatInBroek/shuttli/releases) · [Installation guide](docs/install/ubuntu.md)
+[Release notes and checksums](https://github.com/KatInBroek/shuttli/releases) · [Installation guide](docs/install/ubuntu.md)
 
 This is a **preview release**. macOS packages, Windows packages and Linux ARM64
 packages are not yet published. Tailscale must be installed separately.
@@ -28,7 +28,7 @@ packages are not yet published. Tailscale must be installed separately.
 
 ## Ubuntu package
 
-Download the tested preview from [GitHub Releases](https://github.com/KatInBroek/shuttli/releases/tag/v0.1.0-preview.1).
+Download the tested preview from [GitHub Releases](https://github.com/KatInBroek/shuttli/releases).
 The [Ubuntu installation guide](docs/install/ubuntu.md) covers device setup,
 upgrading and source builds. Each release includes a `.deb`, its SHA-256 checksum
 and source/build metadata.

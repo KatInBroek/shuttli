@@ -25,7 +25,8 @@ independent security certification or reproducible builds without evidence.
 Maintainers publish selected, passing CI artifacts as versioned GitHub Releases.
 Use the exact commit in the artifact's `build.json` as the release tag target,
 and attach the package, checksum and build metadata together. Mark development
-builds as prereleases and update the README download link. Do not overwrite a
+builds as prereleases. The README points to the Releases page, so individual
+version links do not need edits. Do not overwrite a
 published package; publish another version for changed binaries. Regular CI
 artifacts remain available for development without creating a public release on
 every push.

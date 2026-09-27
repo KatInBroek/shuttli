@@ -7,14 +7,14 @@ also accepts native ARM64 binaries, but this is not a tested release promise.
 ## Install
 
 Download the `.deb` and its `.deb.sha256` from the
-[current preview release](https://github.com/KatInBroek/shuttli/releases/tag/v0.1.0-preview.1).
+[GitHub Releases](https://github.com/KatInBroek/shuttli/releases).
 Choose the `.deb` under **Assets**; GitHub's automatic source-code archives are
 not installers. Public release downloads do not require a GitHub account.
-In their directory, run:
+Put only the selected `.deb` and matching checksum file in one directory, then run:
 
 ```sh
-sha256sum --check shuttli_0.1.0_amd64.deb.sha256
-sudo apt install ./shuttli_0.1.0_amd64.deb
+sha256sum --check shuttli_*.deb.sha256
+sudo apt install ./shuttli_*_amd64.deb
 shuttli ui
 ```
 
