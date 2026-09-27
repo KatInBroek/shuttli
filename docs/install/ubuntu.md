@@ -6,12 +6,15 @@ also accepts native ARM64 binaries, but this is not a tested release promise.
 
 ## Install
 
-Download the `.deb` and its `.deb.sha256` from the same release or CI artifact.
-In their directory, substitute the downloaded filename:
+Download the `.deb` and its `.deb.sha256` from the
+[current preview release](https://github.com/KatInBroek/shuttli/releases/tag/v0.1.0-preview.1).
+Choose the `.deb` under **Assets**; GitHub's automatic source-code archives are
+not installers. Public release downloads do not require a GitHub account.
+In their directory, run:
 
 ```sh
-sha256sum --check shuttli_VERSION_amd64.deb.sha256
-sudo apt install ./shuttli_VERSION_amd64.deb
+sha256sum --check shuttli_0.1.0_amd64.deb.sha256
+sudo apt install ./shuttli_0.1.0_amd64.deb
 shuttli ui
 ```
 
@@ -43,7 +46,7 @@ must be checked on the target desktop; pure Wayland without XWayland is unsuppor
 
 ## Upgrade and remove
 
-Exit the running application before upgrading, install the new `.deb` with APT,
+Run `shuttli quit` before upgrading, install the new `.deb` with APT,
 then reopen it. If migrating from a source/user install, disable its autostart,
 stop that instance, and remove or rename the old `~/.local/bin/shuttli` and its
 user desktop launcher so they do not shadow `/usr/bin/shuttli`. Re-enable

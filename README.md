@@ -4,6 +4,15 @@ Peer-to-peer clipboard sync with per-device permissions and verified delivery.
 
 **Development build:** Tailscale discovery and macOS ↔ Linux text and image synchronization are implemented. LAN discovery, Windows, and file transfer remain later work. Machine-specific configuration, screenshots and run reports are kept outside the repository.
 
+## Download
+
+**[Download for Ubuntu 24.04+ · Intel/AMD 64-bit (.deb)](https://github.com/KatInBroek/shuttli/releases/download/v0.1.0-preview.1/shuttli_0.1.0_amd64.deb)**
+
+[Release notes and checksums](https://github.com/KatInBroek/shuttli/releases/tag/v0.1.0-preview.1) · [All releases](https://github.com/KatInBroek/shuttli/releases) · [Installation guide](docs/install/ubuntu.md)
+
+This is a **preview release**. macOS packages, Windows packages and Linux ARM64
+packages are not yet published. Tailscale must be installed separately.
+
 ## Features
 
 - Direct TLS 1.3 connections; no central clipboard server.
@@ -19,9 +28,10 @@ Peer-to-peer clipboard sync with per-device permissions and verified delivery.
 
 ## Ubuntu package
 
-See the [Ubuntu installation guide](docs/install/ubuntu.md) for `.deb` installation,
-device setup, upgrading and building packages. CI exports an amd64 preview package
-for Ubuntu 24.04+, its SHA-256 checksum and source/build metadata.
+Download the tested preview from [GitHub Releases](https://github.com/KatInBroek/shuttli/releases/tag/v0.1.0-preview.1).
+The [Ubuntu installation guide](docs/install/ubuntu.md) covers device setup,
+upgrading and source builds. Each release includes a `.deb`, its SHA-256 checksum
+and source/build metadata.
 
 ## Build and run
 
