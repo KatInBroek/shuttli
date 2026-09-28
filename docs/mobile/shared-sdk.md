@@ -4,9 +4,9 @@ Status: proposed, not implemented. Track [shared SDK #50](https://github.com/Kat
 
 ## Scope
 
-The first mobile apps work while open: explicitly import and send the current clipboard, receive remote content into an inbox, preview it, and copy it locally on request. Use the separately installed official Tailscale client. No QR code, manual address, application account, central clipboard server or Tailscale administrative token is required.
+The first mobile apps work while open: explicitly import and send the current clipboard, receive remote content into an inbox, fetch eligible recent history from desktops, preview it, and copy it locally on request. Use the separately installed official Tailscale client. No QR code, manual address, application account, central clipboard server or Tailscale administrative token is required.
 
-A desktop discovers the phone through its Tailscale peer list and connects to the foreground app. Each desktop is an ordinary peer; none is a coordinator or trust broker. A received item does not automatically replace the phone's system clipboard. Mobile sending is manual; launching, resuming, discovering a device or enabling a direction never sends existing content.
+A desktop discovers the phone through its Tailscale peer list and connects to the foreground app. Each desktop is an ordinary peer; none is a coordinator or trust broker. A received or fetched item does not automatically replace the phone's system clipboard. Mobile sending is manual; launching, resuming, discovering a device or enabling a direction never sends existing content. As phones are often offline, a foreground connection also retrieves bounded recent eligible copies still held in each desktop's session history.
 
 Background clipboard monitoring, lock-screen delivery, push notifications, share extensions, shortcuts, files, independent LAN discovery and phone-only initial discovery are outside this first mobile delivery.
 
@@ -16,8 +16,8 @@ Shared means the same Rust source compiled for each target through Cargo path de
 
 | Component | Reuse and required changes |
 | --- | --- |
-| model, core | Same source; separate permission to receive a body from permission to write the OS clipboard. Preserve desktop invariants. |
-| application, ports, api | Same use cases and contracts; add explicit import, draft, inbox, local copy, capabilities and foreground lifecycle. |
+| model, core | Same source; separate permission to receive a body from permission to write the OS clipboard. Add capture-time history export eligibility and preserve desktop invariants. |
+| application, ports, api | Same use cases and contracts; add explicit import, draft, inbox, local copy, bounded history catch-up, capabilities and foreground lifecycle. |
 | runtime | Bounded serial scheduling with explicit start, pause and stop. |
 | protocol | Extract shared version dispatch, framing and receipt contracts. |
 | adapters-common | Extract TLS, normalization, identity, encryption and storage from desktop-specific adapters. |
@@ -62,7 +62,7 @@ Use UniFFI for generated Swift/Kotlin bindings. Target iOS arm64 and required si
 2. A desktop probes only the application port, currently TCP 45987, on candidates from its allowed Tailscale discovery scope.
 3. Mutual TLS proves application identity; the application handshake exchanges version, name and capabilities.
 4. Both devices show the authenticated peer. The established connection carries both directions regardless of its initiator.
-5. Multiple desktops connect independently; deduplicate by public-key identity. No peer propagates another device's permission or clipboard content.
+5. Multiple desktops connect independently; deduplicate by public-key identity. The phone requests recent eligible history from each authenticated source while foreground. No peer propagates another device's permission or clipboard content.
 
 The first-run prerequisite is at least one upgraded desktop. Tailnet policy must allow desktop-to-phone application connections. A phone refresh can retry its own listener or known connections; it cannot force an unknown desktop to scan. With the current approximately 30-second desktop refresh, target discovery within 40 seconds on a healthy network, subject to real-device validation.
 
@@ -79,11 +79,23 @@ Do not access another app's private LocalAPI/container, scan the whole address s
 
 Copying an inbox item is a separate local operation with a fresh core write permit and current platform checks. It never automatically broadcasts on mobile. Explicit resend creates a new event and rechecks permissions. Local copy success/failure/unverified state does not retroactively turn a Received receipt into Applied. A platform API accepting bytes is not independent readback; report uncertainty honestly.
 
+## Foreground history catch-up contract
+
+Catch-up requires new Wire v2 requests; the existing desktop localhost history API is not a peer history protocol. A source desktop may export only its own local-origin events. It records a bounded, per-event eligibility marker for each already known peer whose outgoing direction, automatic mode and content-type policy allowed sending **at the time of that copy**, regardless of whether the phone was online or a delivery attempt began. An explicit manual send may mark the source event at the time of that action. Turning automatic sending or peer permission on later does not grant retroactive access. Never relay history received from another device.
+
+At both list and content-fetch time, the desktop rechecks the authenticated requester identity, current global/per-device outgoing permission, content-type policy, retention mode and event eligibility marker. The phone rechecks its global/per-device incoming direction before either request. A denied or revoked request yields no content. Treat the marker as session-history metadata under the same count/time/byte/clear limits; it is not a separate archive. Desktop history Off yields no catch-up records. A newly discovered phone has no marker for earlier copies.
+
+Define bounded `HISTORY_LIST(cursor, limit)` and `HISTORY_GET(event_id)` operations with authenticated identity binding, per-source pagination and byte caps. The list returns metadata and availability, not clipboard bodies; `GET` must recheck policy and object identity immediately before sending. Status-only history cannot provide bodies. Never infer or fabricate a delivery receipt from a list/get response: a fetched item is **Available in app** until the user explicitly copies it to the phone OS clipboard. A live receipt and a later list entry for the same wire event ID merge into one row; content equality is not identity. Keep source, copy time, acquisition path, last refresh, availability and per-target outcomes separate. Show clock-skew uncertainty instead of promising exact order between devices.
+
+Fetch metadata from each connected desktop on foreground entry and explicit refresh; fetch content within the phone's existing RAM/encrypted temporary-image quotas, on demand where necessary. Cancel on background entry and discard stale callbacks. An offline desktop, source restart, cleared/disabled history, retention eviction or network error can create a gap; show per-source stale/partial state. A successful list call proves only the current retained window was queried. Do not keep a background listener, add a central server or persist desktop text history to promise complete recovery.
+
+The iOS app uses this contract first. Android may reuse it through the same SDK when its foreground history flow is specified and tested; mobile UI and clipboard adapters remain platform-specific.
+
 ## History and active content
 
 Keep at most one active incoming item and a separately bounded draft. Replacing an active item must not make an already open detail view act on different content. History off still permits viewing/copying the current inbox item.
 
-History defaults to 20 events, configurable from 0 to 10,000 subject to shared metadata, RAM and image quotas. Text/list data stays in the SDK process session; images use a temporary encrypted cache and a session-only key. Active content and history share the same object budget. Per-peer retention can only tighten the global mode.
+History defaults to 20 merged events, configurable from 0 to 10,000 subject to shared metadata, RAM and image quotas. Text/list data stays in the SDK process session; images use a temporary encrypted cache and a session-only key. Active content and history share the same object budget. Per-peer retention can only tighten the global mode. History Off disables catch-up but retains one bounded active inbox item.
 
 Clearing history also clears app drafts/inbox/previews and cancels references before deletion. It does not clear system clipboards or recall remote deliveries. Hide previews on temporary inactivity; clear drafts on background entry. A surviving process may retain inbox/history in RAM, but process restart restores no content and clears orphan ciphertext. Identity, policy, replay protection and necessary receipts are persisted separately. Historical Received remains historical even after its body is gone; receipt queries never redeliver content.
 
@@ -99,6 +111,7 @@ Wire v1 has strict parsing and only Applied semantics. Introduce explicit Wire v
 - Mobile cannot downgrade to v1 and fabricate Applied. Older desktops must receive an actionable upgrade diagnosis where possible.
 - Version local IPC and FFI separately. Unknown receipt states cannot default to success.
 - Show Received distinctly in desktop CLI/UI. Lost receipts permit bounded sender-scoped STATUS queries, never automatic retransmission or clipboard reapplication.
+- Negotiate history-list/get support separately within v2; reject unsupported or older peers with a clear upgrade state. A metadata fetch never means Received or Applied.
 
 ## Independent tasks and gates
 
@@ -110,6 +123,7 @@ Wire v1 has strict parsing and only Applied semantics. Introduce explicit Wire v
 | M04 | Extract common adapters without changing desktop behavior, then assemble a mobile SDK with explicit capabilities and lifecycle. No desktop dependency leaks into mobile. |
 | M05 | Desktop v1 regression, phone probing, Received UI/CLI, disconnect results and policy handling, testable without mobile UI. |
 | M06 | Traceable desktop/SDK/wire/mobile version matrix and independent release evidence for each platform. |
+| M07 | Bounded capture-time eligibility markers and authenticated history list/get with policy rechecks; offline-phone catch-up, multi-source merge, no-forwarding, revoked consent, eviction and partial-history tests. |
 
 M01/M02 resolve feasibility first; M03-M05 establish shared behavior. iOS and Android UI releases proceed independently after their shared prerequisites. Use one repository/workspace; do not create empty app projects as evidence of implementation.
 
