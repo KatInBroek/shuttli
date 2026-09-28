@@ -1,6 +1,6 @@
 # Shared mobile SDK and desktop-assisted discovery
 
-Status: proposed, not implemented. Track [shared SDK #50](https://github.com/KatInBroek/shuttli/issues/50), [iOS #51](https://github.com/KatInBroek/shuttli/issues/51) and [Android #52](https://github.com/KatInBroek/shuttli/issues/52).
+Status: proposed, not implemented. The [mobile feature specification](feature-spec.md) owns product requirements. Track [shared SDK #50](https://github.com/KatInBroek/shuttli/issues/50), [iOS #51](https://github.com/KatInBroek/shuttli/issues/51) and [Android #52](https://github.com/KatInBroek/shuttli/issues/52).
 
 ## Scope
 
@@ -80,11 +80,11 @@ Reuse the existing bounded TLS transport, identity, session selection, framing a
 | Desktop clipboard | Applied only after conflict checks, OS write, independent OS readback and durable receipt. |
 | Mobile inbox | Received after validation and admission into the bounded app cache; no OS clipboard read/write is implied. |
 
-Copying an inbox item is a separate local operation with a fresh core write permit and current platform checks. It never automatically broadcasts on mobile. Explicit resend creates a new event and rechecks permissions. Local copy success/failure/unverified state does not retroactively turn a Received receipt into Applied. A platform API accepting bytes is not independent readback; report uncertainty honestly.
+Copying an inbox item is a separate local operation with a fresh core write permit and current platform checks. It never automatically broadcasts on mobile. Explicit resend of a phone-origin item creates a new event and rechecks permissions. Local copy success/failure/unverified state does not retroactively turn a Received receipt into Applied. A platform API accepting bytes is not independent readback; report uncertainty honestly.
 
 ## Foreground history catch-up contract
 
-Catch-up requires new Wire v2 requests; the existing desktop localhost history API is not a peer history protocol. A source desktop may export only its own local-origin events. It records a bounded, per-event eligibility marker for each already known peer whose outgoing direction, automatic mode and content-type policy allowed sending **at the time of that copy**, regardless of whether the phone was online or a delivery attempt began. An explicit manual send may mark the source event at the time of that action. Turning automatic sending or peer permission on later does not grant retroactive access. Never relay history received from another device.
+Catch-up requires new Wire v2 requests; the existing desktop localhost history API is not a peer history protocol. A source desktop may export only its own local-origin events. It records a bounded, per-event eligibility marker for each already known peer whose outgoing direction, automatic mode and content-type policy allowed sending **at the time of that copy**, regardless of whether the phone was online or a delivery attempt began. An explicit manual send creates a new event with its own allowed targets, leaving an older local copy unmarked. Turning automatic sending or peer permission on later does not grant retroactive access. Never relay history received from another device.
 
 At both list and content-fetch time, the desktop rechecks the authenticated requester identity, current global/per-device outgoing permission, content-type policy, retention mode and event eligibility marker. The phone rechecks its global/per-device incoming direction before either request. A denied or revoked request yields no content. Treat the marker as session-history metadata under the same count/time/byte/clear limits; it is not a separate archive. Desktop history Off yields no catch-up records. A newly discovered phone has no marker for earlier copies.
 
@@ -92,7 +92,7 @@ Define bounded `HISTORY_LIST(cursor, limit)` and `HISTORY_GET(event_id)` operati
 
 Fetch metadata from each connected desktop on foreground entry and explicit refresh; fetch content within the phone's existing RAM/encrypted temporary-image quotas, on demand where necessary. While the phone stays open, a desktop sends a lightweight `HISTORY_CHANGED(revision)` hint only when that phone's authorized retained window changes through an eligible new copy, explicit manual send, retention or clear. Coalesce hints so rapid copies do not create unbounded work. The phone then fetches the changed bounded window and only new/needed bodies. A per-source cursor/revision avoids repeated full body transfers; after reconnect, missed revision, source epoch change or invalid cursor, reconcile that source's current bounded window. Do not rely on a notification as proof that content was received. Cancel on background entry and discard stale callbacks. An offline desktop, source restart, cleared/disabled history, retention eviction or network error can create a gap; show per-source stale/partial state. A successful list call proves only the current retained window was queried. Do not keep a background listener, add a central server or persist desktop text history to promise complete recovery.
 
-The iOS app uses this contract first. Android may reuse it through the same SDK when its foreground history flow is specified and tested; mobile UI and clipboard adapters remain platform-specific.
+Both apps use this contract through the same SDK; each platform validates its own foreground history flow. Mobile UI and clipboard adapters remain platform-specific.
 
 ## History and active content
 

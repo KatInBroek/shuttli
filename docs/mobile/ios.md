@@ -1,6 +1,6 @@
 # iOS foreground app specification
 
-Status: proposed; not implemented or device-validated. [Issue #51](https://github.com/KatInBroek/shuttli/issues/51). Prerequisite: [shared SDK](shared-sdk.md). Android has its [own specification](android.md).
+Status: proposed; not implemented or device-validated. The [mobile feature specification](feature-spec.md) owns product requirements. [Issue #51](https://github.com/KatInBroek/shuttli/issues/51). Prerequisite: [shared SDK](shared-sdk.md). Android has its [own specification](android.md).
 
 ## Scope and platform
 
@@ -42,7 +42,7 @@ Distinguish cancellation, unsupported/empty content, sensitive markers, import f
 
 ## Foreground history catch-up and merge
 
-Because the phone is active only briefly, each authenticated desktop exposes a bounded list of its **own local-origin copies** that were eligible for this phone when they occurred. It must not export another device's received history. On each local copy, the desktop records capture-time eligibility for already known and authorized peers, even if the phone is offline and no delivery attempt can start. This marker is bounded session-history metadata, not a durable archive. Explicit manual sends may mark their source event when the user sends it; simply switching automatic sending on later must not mark earlier copies. At query and body fetch, current global/per-device send and content permissions must still allow export. Granting or re-enabling permission never exposes older copies retroactively. If the phone's global/per-device receive direction is off, do not fetch metadata or bodies.
+Because the phone is active only briefly, each authenticated desktop exposes a bounded list of its **own local-origin copies** that were eligible for this phone when they occurred. It must not export another device's received history. On each local copy, the desktop records capture-time eligibility for already known and authorized peers, even if the phone is offline and no delivery attempt can start. This marker is bounded session-history metadata, not a durable archive. An explicit manual send creates a new event with its own allowed targets; it does not mark an older copy. Simply switching automatic sending on later must not mark earlier copies. At query and body fetch, current global/per-device send and content permissions must still allow export. Granting or re-enabling sending permission does not make copies from an unpermitted interval eligible; previously eligible retained items may still be fetched after re-enabling. If the phone's global/per-device receive direction is off, do not fetch metadata or bodies.
 
 On foreground connection, request recent metadata from each eligible desktop, page within limits and fetch bounded content into the phone's existing session history budget. Keep text/list data in RAM and encrypted image objects in a temporary cache. Content can also be fetched on item open if still available at its source; show **Content no longer available** if eviction or disconnection wins that race. While open, use lightweight history-change hints to request incremental updates and update the visible timeline. Reconcile the bounded window after reconnect or a missed change. Refresh on demand and after a new authenticated connection. Do not poll while backgrounded, do not wake a suspended app and do not keep a background listener.
 
@@ -92,7 +92,7 @@ Depend on M01-M05, not Android UI completion. Track app/SDK versions and device 
 | IOS-03 | Explicit paste plus send yields matching independent Linux clipboard readback; opening alone sends nothing. |
 | IOS-04 | Incoming preview is correct, sender reports Received and phone clipboard is unchanged. |
 | IOS-05 | Other apps paste copied text/images; result is truthful and nothing is forwarded automatically. |
-| IOS-06 | Global/per-peer/type restrictions cover sends, resends and reception; re-enabling never replays old content. |
+| IOS-06 | Global/per-peer/type restrictions cover sends, resends and reception; re-enabling sending does not make copies from a disabled interval eligible, and re-enabling phone reception never writes old content to the OS clipboard. |
 | IOS-07 | History count 20/0, status mode, policy tightening, quota/clear and ciphertext deletion behave correctly; unavailable actions cannot substitute bodies. |
 | IOS-08 | Background, lock, termination and restart cause no background synchronization/replay; identity persists, content does not survive restart. |
 | IOS-09 | Disconnects, lost receipts and duplicate events remain truthful; queries do not reapply and clearing history preserves replay protection. |

@@ -101,7 +101,7 @@ Use the [grouped roadmap](https://github.com/KatInBroek/shuttli/issues/1) or [mi
 
 - [Desktop design and UI requirements](docs/design/desktop.md)
 - [Windows and regular-file extension contracts](docs/planned/windows-and-files.md)
-- Mobile proposals: [shared Rust SDK](docs/mobile/shared-sdk.md), [iOS](docs/mobile/ios.md), [Android](docs/mobile/android.md)
+- Mobile proposal: [feature requirements](docs/mobile/feature-spec.md), with [shared Rust SDK](docs/mobile/shared-sdk.md), [iOS](docs/mobile/ios.md), and [Android](docs/mobile/android.md) details
 
 These proposals describe unfinished work. They do not imply that the platforms or features are currently supported.
 

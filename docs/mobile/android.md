@@ -1,16 +1,16 @@
 # Android foreground app specification
 
-Status: proposed; not implemented or device-validated. [Issue #52](https://github.com/KatInBroek/shuttli/issues/52). Prerequisite: [shared SDK](shared-sdk.md); [iOS specification](ios.md) is independent.
+Status: proposed; not implemented or device-validated. The [mobile feature specification](feature-spec.md) owns product requirements. [Issue #52](https://github.com/KatInBroek/shuttli/issues/52). Prerequisite: [shared SDK](shared-sdk.md); [iOS specification](ios.md) is independent.
 
 ## Scope and platform
 
 Use Kotlin/Jetpack Compose with UniFFI bindings to the shared Rust SDK. Proposed minSdk 29 must be confirmed in the build spike; fix target/compile SDK against implementation and distribution requirements. Prioritize phones; tablet/foldable layouts are separate work.
 
-Use the official external Tailscale client, not an embedded VpnService. Support foreground discovery, explicit text/image import/send, inbox preview/local copy, limited history/resend, per-device/global consent and four languages. Do not require a foreground service, background clipboard listener, default IME, accessibility service, root/Shizuku, persistent notification, wake lock or battery-optimization exemption. Share intents, files, LAN, phone-only discovery, FCM, cloud accounts and autostart are outside this first delivery.
+Use the official external Tailscale client, not an embedded VpnService. Support foreground discovery, explicit text/image import/send, inbox preview/local copy, recent multi-computer history catch-up and incremental updates, per-device/global consent and four languages. Do not require a foreground service, background clipboard listener, default IME, accessibility service, root/Shizuku, persistent notification, wake lock or battery-optimization exemption. Share intents, files, LAN, phone-only discovery, FCM, cloud accounts and autostart are outside this first delivery.
 
 ## Discovery and explicit sending
 
-An upgraded desktop discovers the phone through Tailscale, probes the application port and authenticates the foreground listener. One connection carries both directions. Deduplicate application identity; Tailscale online state alone does not prove the application is connected. Target first discovery within 40 seconds on a healthy network; refresh cannot force an unknown desktop to scan. Diagnose absent desktops, policy denial, listener failure and VPN split-tunneling where known. Never scan the full address space or modify VPN settings automatically.
+An upgraded desktop discovers the phone through Tailscale, probes the application port and authenticates the foreground listener. One connection carries both directions. A desktop allowed to send to the phone shares a bounded list of authenticated Shuttli peer hints. The phone contacts suggested peers directly or reuses their sessions; each source independently authenticates the phone and checks its own send policy before history export. Deduplicate application identity; Tailscale online state alone does not prove the application is connected. Target first discovery within 40 seconds on a healthy network; refresh cannot force an unknown desktop to scan. Diagnose absent desktops, policy denial, listener failure and VPN split-tunneling where known. Never scan the full address space or modify VPN settings automatically.
 
 Read the clipboard only after an explicit paste action while the Activity is resumed and has window focus. A foreground service does not grant background clipboard access. Do not pre-read content to populate device lists or notifications, and never send on launch/resume.
 
@@ -20,7 +20,7 @@ Show a draft snapshot, type, size and allowed targets. Send publishes the displa
 
 ## Inbox and image clipboard exports
 
-Received means validated content admitted to the app inbox, not an OS clipboard write. Show source/time/preview. Explicit local copy requests a fresh core write permit and never automatically forwards. Explicit resend creates another event. Copy result does not change a historical network receipt to Applied.
+Received means validated content admitted to the app inbox, not an OS clipboard write. Show source/time/preview. Explicit local copy requests a fresh core write permit and never automatically forwards. Explicit resend of a phone-origin item creates another event. Copy result does not change a historical network receipt to Applied.
 
 Android image clipboard sharing requires a native readable URI, not raw image bytes, a private path or an encrypted cache filename. Provide a restricted ContentProvider or equivalent:
 
@@ -37,9 +37,9 @@ Readback must use an independent clipboard/provider path and verify readable byt
 
 Defaults: global send/receive on, new-device send off/receive on, manual sending. Apply per-peer direction, text/image, tighter retention and quiet rules. Offer full-fingerprint comparison; discovery cannot grant outgoing consent. Persistence failure must report actual state and fail closed.
 
-History defaults to 20 events, configurable 0-10,000 subject to quotas; Off/Status/Content modes. Keep text/list data in session memory and images in a temporary encrypted cache. With history off, one bounded current inbox item remains usable. Active/history content shares one budget. Clear removes app inbox/drafts/previews/cache; explicitly explain that system clipboard exports follow their separate lifecycle. Missing bodies disable preview/copy/resend rather than substituting current content. Preserve identity/policy/replay/receipts separately across restart.
+History defaults to 20 merged events, configurable 0-10,000 subject to quotas; Off/Status/Content modes. On opening, fetch each authorized desktop's eligible recent local-origin events; while foreground, fetch incremental changes when notified. Merge by wire event ID with live receipts and phone-origin sends, retaining source, copy time, availability and per-target outcomes. A peer hint never grants access to another source, and fetched content never overwrites the OS clipboard. Keep text/list data in session memory and images in a temporary encrypted cache. With history off, disable catch-up and keep one bounded current inbox item usable. Active/history content shares one budget. Clear removes app inbox/drafts/previews/cache; explicitly explain that still-retained remote items may be fetched again on later opening and that system clipboard exports follow their separate lifecycle. Missing bodies disable preview/copy/resend rather than substituting current content. Preserve identity/policy/replay/receipts separately across restart.
 
-Provide Send/Receive, Devices, History and Settings with native Compose navigation and shared assets. Support system language plus English, Dutch, German and French; TalkBack, large fonts, light/dark themes, long content/names and back navigation. Do not expose misleading automatic-background or autostart switches. In-app hints are sufficient; system notification consent is not a prerequisite. Ask only for required network and specific URI access, never broad storage, contacts, camera or accessibility permission for synchronization.
+Provide Home, History, Devices and Settings with native Compose navigation and shared assets. History has All / From devices / Sent from this phone and source filters, plus per-source freshness and incomplete/unavailable states. Support system language plus English, Dutch, German and French; TalkBack, large fonts, light/dark themes, long content/names and back navigation. Do not expose misleading automatic-background or autostart switches. In-app hints are sufficient; system notification consent is not a prerequisite. Ask only for required network and specific URI access, never broad storage, contacts, camera or accessibility permission for synchronization.
 
 Design waiting/discovery, fingerprint/consent, draft, per-target transfer, inbox/copy outcomes, history/unavailable bodies, settings/clear and failure states. Distinguish Received from Applied; show percentages only when byte progress is real. Permission refusal must leave other features usable and must not trigger repeated prompts.
 
@@ -60,6 +60,7 @@ Protect private identity/policy/cache files, exclude them from cloud backup/logs
 | A03 | Four Compose views, settings/history/language/in-app hints; Activity recreation never duplicates the SDK. |
 | A04 | Complete device matrix below and real cross-app image paste; emulators are supplemental. |
 | A05 | Reproducible APK/AAB with traceable ABI/SDK versions; upgrade preserves identity/policy, signing credentials stay external. Store publication is separate. |
+| A06 | Foreground multi-desktop history catch-up, event-ID merge, incremental refresh, source freshness and explicit phone copy. Verify revoked consent, missing bodies and incomplete history. |
 
 Depend on M01-M05, not iOS UI completion. Aim to test a near-stock device and a mainstream vendor device; one OS/version is not evidence for all Android devices.
 
@@ -73,13 +74,15 @@ Depend on M01-M05, not iOS UI completion. Aim to test a near-stock device and a 
 | AND-04 | Inbox preview is correct, OS clipboard is unchanged and the sender sees Received rather than Applied. |
 | AND-05 | Other apps can paste copied text/images; granted URIs expose no unrelated data and do not cause forwarding. |
 | AND-06 | Clearing history removes history ciphertext/previews while active exported images remain pasteable according to their policy; expired/restarted URIs never return a different object. |
-| AND-07 | Global/per-peer direction and content-type rules cover every send/resend/receive path; enabling never replays content. |
+| AND-07 | Global/per-peer direction and content-type rules cover every send/resend/receive path; re-enabling sending does not make copies from a disabled interval eligible, and re-enabling phone reception never writes old content to the OS clipboard. |
 | AND-08 | Default 20, zero, status mode, quota eviction and cleanup failures preserve correct availability. |
 | AND-09 | Focus, rotation, background, force-stop and resume cause no background reads/networking, duplicate SDK or old-draft replay. |
 | AND-10 | Split-tunneling, ACL, offline and old-version failures report real or unknown causes without fabricated connection/success. |
 | AND-11 | Duplicate events, lost receipts and three-node operation preserve query-only recovery, replay protection and no-forwarding. |
 | AND-12 | URI denial, corrupt/oversized content and provider timeout fail within bounds without arbitrary path access. |
 | AND-13 | Four languages, TalkBack and large layouts work; 20 image transfers and lifecycle loops show no unbounded resource growth. |
+| AND-14 | Offline-phone copies from two independently authorized desktops merge on opening without earlier delivery attempts; new eligible copies appear incrementally while foreground, with duplicate event IDs collapsed but separate identical copies preserved. |
+| AND-15 | Peer-list hints are accepted only from an authorized sender; each suggested source is verified directly and returns history only under its own send policy. Fetching/previewing never changes the Android clipboard or relays content. |
 
 All mobile acceptance remains pending. Keep device/vendor/version/configuration and synthetic reproduction evidence outside the repository. Rust coverage and emulator builds do not substitute for device acceptance.
 
