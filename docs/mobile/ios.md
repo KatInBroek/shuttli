@@ -1,6 +1,6 @@
 # iOS foreground app specification
 
-Status: proposed; not implemented or device-validated. The [mobile feature specification](feature-spec.md) owns product requirements. [Issue #51](https://github.com/KatInBroek/shuttli/issues/51). Prerequisite: [shared SDK](shared-sdk.md). Android has its [own specification](android.md).
+Status: proposed; not implemented or device-validated. The [mobile feature specification](feature-spec.md) owns product requirements. [Issue #51](https://github.com/KatInBroek/shuttli/issues/51). Prerequisite: [shared SDK](shared-sdk.md); the temporary-Mac workflow is in the [development and test plan](ios-development-plan.md). Android has its [own specification](android.md).
 
 ## Scope and platform
 
