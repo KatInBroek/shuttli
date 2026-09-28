@@ -15,9 +15,11 @@ import tempfile
 import struct
 import zlib
 import time
+from isolated_session import require_isolated_session
 
 
 def main():
+    require_isolated_session()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, required=True)
     args = parser.parse_args()

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """GTK interaction/visual regression using a synthetic public API fixture.
 
-Run with GDK_BACKEND=x11 xvfb-run -a /usr/bin/python3 tools/integration/linux_ui.py.
+Run with GDK_BACKEND=x11 python3 tools/integration/isolated_session.py --
+  xvfb-run -a /usr/bin/python3 tools/integration/linux_ui.py.
 No user clipboard, synchronization settings, or autostart files are changed.
 """
 import base64
@@ -13,6 +14,9 @@ from pathlib import Path
 import sys
 import tempfile
 import time
+from isolated_session import require_isolated_session
+
+require_isolated_session()
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'crates/native-ui/linux'))

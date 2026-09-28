@@ -27,9 +27,9 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update && sudo apt-get install -y xvfb xclip dbus-x11 python3-gi
-          xvfb-run -a cargo test --locked -p shuttli-contract-tests --test native_clipboard -- --ignored
+          python3 tools/integration/isolated_session.py -- xvfb-run -a cargo test --locked -p shuttli-contract-tests --test native_clipboard -- --ignored
           cargo build --locked -p shuttli-host
-          xvfb-run -a dbus-run-session -- python3 tools/integration/daemon_lifecycle.py --binary target/debug/shuttli
+          python3 tools/integration/isolated_session.py -- xvfb-run -a python3 tools/integration/daemon_lifecycle.py --binary target/debug/shuttli
       - run: python tools/check_architecture.py
       - run: python -m unittest discover -s tools/tests -v
       - run: cargo run --locked -p shuttli-host -- --help
@@ -67,9 +67,9 @@ jobs:
           GSK_RENDERER: cairo
           GTK_A11Y: none
           SHUTTLI_UI_REPORT: target/ui-qa
-        run: xvfb-run -a -s '-screen 0 1100x850x24' dbus-run-session -- /usr/bin/python3 tools/integration/linux_ui.py
+        run: python3 tools/integration/isolated_session.py -- xvfb-run -a -s '-screen 0 1100x850x24' /usr/bin/python3 tools/integration/linux_ui.py
       - name: Exercise cached tray menu property updates over D-Bus
-        run: dbus-run-session -- /usr/bin/python3 tools/integration/tray_properties.py
+        run: python3 tools/integration/isolated_session.py -- /usr/bin/python3 tools/integration/tray_properties.py
       - name: Save screenshots and interaction results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

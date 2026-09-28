@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Real D-Bus regression for panels that cache existing menu properties.
 
-Run: dbus-run-session -- /usr/bin/python3 tools/integration/tray_properties.py
+Run: python3 tools/integration/isolated_session.py --
+  /usr/bin/python3 tools/integration/tray_properties.py
 Uses an isolated synthetic API; never touches the user's daemon or clipboard.
 """
 import hashlib
@@ -14,6 +15,9 @@ import sys
 import tempfile
 import threading
 import time
+from isolated_session import require_isolated_session
+
+require_isolated_session()
 from gi.repository import Gio, GLib
 
 ROOT = Path(__file__).resolve().parents[2]
