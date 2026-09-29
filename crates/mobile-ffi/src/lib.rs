@@ -243,11 +243,8 @@ impl MobileSession {
     }
 
     pub fn history_count(&self) -> u32 {
-        self.history
-            .lock()
-            .expect("mobile session lock")
-            .timeline()
-            .len() as u32
+        let history = self.history.lock().expect("mobile session lock");
+        history.timeline().len() as u32
     }
 
     pub fn history_mode(&self) -> MobileHistoryMode {
@@ -308,9 +305,8 @@ impl MobileSession {
                     .map(|p| (p.id, p.name))
                     .collect()
             });
-        self.history
-            .lock()
-            .expect("mobile session lock")
+        let history = self.history.lock().expect("mobile session lock");
+        history
             .timeline()
             .into_iter()
             .map(|row| MobileHistoryRow {
@@ -325,7 +321,7 @@ impl MobileSession {
                     Format::Png => MobileContentKind::Image,
                 },
                 bytes: row.summary.metadata.size,
-                available: row.body.is_some(),
+                available: history.body_available(row.summary.event),
                 is_local: own == Some(row.source),
             })
             .collect()

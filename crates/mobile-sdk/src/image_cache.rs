@@ -113,12 +113,7 @@ impl ImageCache {
     }
 
     pub fn get(&self, object: &ImageObject) -> Option<Arc<[u8]>> {
-        if object.path.parent()? != self.dir
-            || !fs::symlink_metadata(&object.path)
-                .ok()?
-                .file_type()
-                .is_file()
-        {
+        if !self.contains(object) {
             return None;
         }
         let ciphertext = fs::read(&object.path).ok()?;
@@ -130,5 +125,12 @@ impl ImageCache {
             .decrypt(XNonce::from_slice(&object.nonce), ciphertext.as_slice())
             .ok()?;
         Some(body.into())
+    }
+
+    pub fn contains(&self, object: &ImageObject) -> bool {
+        object.path.parent() == Some(self.dir.as_path())
+            && fs::symlink_metadata(&object.path).is_ok_and(|metadata| {
+                metadata.file_type().is_file() && metadata.len() == object.size as u64 + 16
+            })
     }
 }

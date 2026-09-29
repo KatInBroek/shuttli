@@ -259,13 +259,13 @@ impl MobileHistory {
             return Err(HistoryError::InvalidBody);
         }
         let cached = if self.mode == HistoryMode::Content {
-            Some(match metadata.format {
-                shuttli_model::sync::Format::Text => CachedBody::Memory(body),
+            match metadata.format {
+                shuttli_model::sync::Format::Text => Some(CachedBody::Memory(body)),
                 shuttli_model::sync::Format::Png => match &self.image_cache {
-                    Some(cache) => cache.put(&body).map_err(|_| HistoryError::InvalidBody)?,
-                    None => CachedBody::Memory(body),
+                    Some(cache) => cache.put(&body).ok(),
+                    None => Some(CachedBody::Memory(body)),
                 },
-            })
+            }
         } else {
             None
         };
@@ -277,7 +277,7 @@ impl MobileHistory {
                     event,
                     metadata,
                     copied_at_ms,
-                    body_available: true,
+                    body_available: cached.is_some(),
                 },
                 body: cached,
             },
@@ -296,6 +296,16 @@ impl MobileHistory {
                     .then_some(bytes)
             }
         }
+    }
+    pub fn body_available(&self, event: EventId) -> bool {
+        self.rows.get(&event).is_some_and(|row| match &row.body {
+            Some(CachedBody::Memory(_)) => true,
+            Some(CachedBody::EncryptedImage(object)) => self
+                .image_cache
+                .as_ref()
+                .is_some_and(|cache| cache.contains(object)),
+            None => false,
+        })
     }
     pub fn timeline(&self) -> Vec<TimelineItem> {
         let mut rows: Vec<_> = self.rows.values().cloned().collect();
@@ -555,7 +565,13 @@ mod tests {
             digest: shuttli_content::canonical_digest(Format::Png, &png).unwrap(),
         };
         history
-            .record_local_sent(generation, event, metadata, Arc::from(png.clone()), 1)
+            .record_local_sent(
+                generation,
+                event,
+                metadata.clone(),
+                Arc::from(png.clone()),
+                1,
+            )
             .unwrap();
         let cache_dir = base.join("shuttli-images-v1");
         let file = std::fs::read_dir(&cache_dir)
@@ -570,6 +586,7 @@ mod tests {
             png.as_slice()
         );
         std::fs::write(&file, b"tampered ciphertext").unwrap();
+        assert!(!history.body_available(event));
         assert!(history.body_for_explicit_copy(event).is_none());
         history.clear();
         assert!(!file.exists());
@@ -578,6 +595,13 @@ mod tests {
         let _next_session = ImageCache::new(&base).unwrap();
         assert!(!orphan.exists());
         std::fs::remove_dir_all(base).unwrap();
+        let later = EventId { seq: 2, ..event };
+        history
+            .record_local_sent(history.generation(), later, metadata, Arc::from(png), 2)
+            .unwrap();
+        assert_eq!(history.timeline().len(), 1);
+        assert!(!history.timeline()[0].summary.body_available);
+        assert!(!history.body_available(later));
     }
 
     #[test]
