@@ -70,6 +70,9 @@ impl PeerDirectory {
             hints: BTreeMap::new(),
         }
     }
+    pub fn own_id(&self) -> DeviceId {
+        self.own
+    }
 
     /// `id` is derived from the directly presented certificate, not a hint.
     pub fn observed_direct(

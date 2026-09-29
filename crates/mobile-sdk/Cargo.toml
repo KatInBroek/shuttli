@@ -18,3 +18,5 @@ shuttli-model.workspace = true
 shuttli-protocol = { path = "../protocol" }
 shuttli-identity.workspace = true
 sha2.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true

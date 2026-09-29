@@ -27,4 +27,9 @@ workspace = true
 
 [dependencies]
 shuttli-mobile-sdk.workspace = true
+shuttli-model.workspace = true
+hex.workspace = true
 uniffi = "=0.31.2"
+
+[dev-dependencies]
+sha2.workspace = true

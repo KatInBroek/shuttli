@@ -1118,7 +1118,10 @@ dependencies = [
 name = "shuttli-mobile-ffi"
 version = "0.1.1"
 dependencies = [
+ "hex",
+ "sha2",
  "shuttli-mobile-sdk",
+ "shuttli-model",
  "uniffi",
 ]
 
@@ -1130,6 +1133,8 @@ dependencies = [
  "shuttli-identity",
  "shuttli-model",
  "shuttli-protocol",
+ "tokio",
+ "tokio-rustls",
 ]
 
 [[package]]

@@ -1,6 +1,7 @@
 //! Session-only mobile history. Network adapters supply authenticated pages;
 //! this crate never reads the OS clipboard or persists fetched content.
 pub mod peers;
+pub mod transport;
 use sha2::{Digest, Sha256};
 pub use shuttli_identity::Identity;
 use shuttli_model::{
@@ -72,6 +73,9 @@ impl MobileHistory {
     }
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+    pub fn is_active(&self) -> bool {
+        self.active
     }
     pub fn source(&self, id: DeviceId) -> Option<SourceFreshness> {
         self.freshness.get(&id).copied()

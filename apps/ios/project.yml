@@ -10,6 +10,7 @@ settings:
     PRODUCT_BUNDLE_IDENTIFIER: org.katinbroek.shuttli
     GENERATE_INFOPLIST_FILE: YES
     INFOPLIST_KEY_CFBundleDisplayName: $(SHUTTLI_PRODUCT_NAME)
+    INFOPLIST_KEY_NSLocalNetworkUsageDescription: Connect directly to your permitted devices through Tailscale.
     INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
     TARGETED_DEVICE_FAMILY: "1,2"
     CODE_SIGNING_ALLOWED: NO
