@@ -35,6 +35,7 @@ shuttli-host = { path = "crates/host" }
 shuttli-contract-tests = { path = "crates/contract-tests" }
 shuttli-mobile-sdk = { path = "crates/mobile-sdk" }
 shuttli-mobile-ffi = { path = "crates/mobile-ffi" }
+shuttli-content = { path = "crates/content" }
 shuttli-protocol = { path = "crates/protocol" }
 shuttli-identity = { path = "crates/identity" }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }

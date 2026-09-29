@@ -485,6 +485,17 @@ fn retained_local_history_requires_current_outgoing_permission_for_list_and_body
     assert_eq!(page.items[0].event, event);
     assert!(page.items[0].body_available);
     assert_eq!(policy_revision, h.network.lock().unwrap().revision);
+    let (tx, rx) = mpsc::sync_channel(1);
+    h.network
+        .lock()
+        .unwrap()
+        .input
+        .push_back(NetworkEvent::HistoryRevisionQuery {
+            peer: [2; 32],
+            reply: tx,
+        });
+    block_on(h.app.tick());
+    assert!(rx.recv().unwrap().unwrap().1 > 0);
 
     let old = h.settings().peers[&"02".repeat(32)].clone();
     assert!(matches!(
@@ -503,6 +514,17 @@ fn retained_local_history_requires_current_outgoing_permission_for_list_and_body
         .push_back(NetworkEvent::HistoryGetQuery {
             peer: [2; 32],
             event,
+            reply: tx,
+        });
+    block_on(h.app.tick());
+    assert!(rx.recv().unwrap().is_err());
+    let (tx, rx) = mpsc::sync_channel(1);
+    h.network
+        .lock()
+        .unwrap()
+        .input
+        .push_back(NetworkEvent::HistoryRevisionQuery {
+            peer: [2; 32],
             reply: tx,
         });
     block_on(h.app.tick());

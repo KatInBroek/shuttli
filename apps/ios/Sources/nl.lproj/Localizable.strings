@@ -46,3 +46,8 @@
 "transfer_applied" = "Toegepast op apparaat";
 "transfer_failed" = "Mislukt";
 "transfer_unknown" = "Resultaat onbekend";
+"this_phone" = "Deze telefoon";
+"send_again" = "Opnieuw verzenden";
+"paste_text" = "Tekst plakken";
+"paste_image" = "Afbeelding plakken";
+"image_too_large" = "Afbeelding is te groot of wordt niet ondersteund";

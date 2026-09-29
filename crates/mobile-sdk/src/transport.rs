@@ -4,7 +4,6 @@ use crate::{
     MobileHistory,
     peers::{Candidate, PeerDirectory},
 };
-use sha2::{Digest, Sha256};
 use shuttli_identity::{Identity, device_id};
 use shuttli_model::{
     mobile::Capabilities,
@@ -465,9 +464,11 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                             pending_list = true;
                         }
                     }
-                    FrameV2::HistoryChanged { .. } if !pending_list && pending_body.is_none() => {
-                        write_frame(stream, &FrameV2::HistoryListRequest { cursor: None, limit: 20 }).await?;
-                        pending_list = true;
+                    FrameV2::HistoryChanged { .. } => {
+                        if !pending_list && pending_body.is_none() {
+                            write_frame(stream, &FrameV2::HistoryListRequest { cursor: None, limit: 20 }).await?;
+                            pending_list = true;
+                        }
                     }
                     FrameV2::Error { .. } => {
                         pending_list = false;
@@ -532,7 +533,8 @@ async fn send_offer<S: AsyncRead + AsyncWrite + Unpin>(
         || command.metadata.size == 0
         || command.metadata.size > 8 * 1024 * 1024
         || matches!(command.metadata.format, Format::Text) && command.metadata.size > 1024 * 1024
-        || Sha256::digest(&command.body).as_slice() != command.metadata.digest
+        || shuttli_content::canonical_digest(command.metadata.format, &command.body).ok()
+            != Some(command.metadata.digest)
     {
         return Ok(SendState::Failed);
     }
@@ -624,7 +626,6 @@ async fn read_frame(stream: &mut (impl AsyncRead + Unpin)) -> Result<FrameV2> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sha2::{Digest, Sha256};
     use shuttli_model::{
         mobile::HistorySummary,
         sync::{Format, Metadata},
@@ -651,7 +652,7 @@ mod tests {
         let metadata = Metadata {
             format: Format::Text,
             size: bytes.len() as u64,
-            digest: Sha256::digest(bytes).into(),
+            digest: shuttli_content::canonical_digest(Format::Text, bytes).unwrap(),
         };
         let history = Arc::new(Mutex::new(MobileHistory::default()));
         let generation = history.lock().unwrap().enter_foreground();
@@ -692,6 +693,9 @@ mod tests {
                 limit: 20
             }
         ));
+        write_frame(&mut desktop, &FrameV2::HistoryChanged { revision: 1 })
+            .await
+            .unwrap();
         write_frame(
             &mut desktop,
             &FrameV2::HistoryListResponse {
@@ -760,7 +764,7 @@ mod tests {
             metadata: Metadata {
                 format: Format::Text,
                 size: bytes.len() as u64,
-                digest: Sha256::digest(&bytes).into(),
+                digest: shuttli_content::canonical_digest(Format::Text, &bytes).unwrap(),
             },
             body: bytes.clone(),
         };

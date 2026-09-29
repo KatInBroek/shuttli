@@ -46,3 +46,8 @@
 "transfer_applied" = "Applied on device";
 "transfer_failed" = "Failed";
 "transfer_unknown" = "Outcome unknown";
+"this_phone" = "This phone";
+"send_again" = "Send again";
+"paste_text" = "Paste text";
+"paste_image" = "Paste image";
+"image_too_large" = "Image is too large or unsupported";

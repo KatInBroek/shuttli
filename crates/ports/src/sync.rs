@@ -67,6 +67,10 @@ pub enum NetworkEvent {
         peer: DeviceId,
         reply: SyncSender<Result<u64>>,
     },
+    HistoryRevisionQuery {
+        peer: DeviceId,
+        reply: SyncSender<Result<(u64, u64)>>,
+    },
     HistoryListQuery {
         peer: DeviceId,
         cursor: Option<HistoryCursor>,

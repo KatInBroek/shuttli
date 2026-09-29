@@ -252,6 +252,24 @@ impl Service {
                     .map_err(|e| format!("{e:?}"));
                 let _ = reply.send(result);
             }
+            NetworkEvent::HistoryRevisionQuery { peer, reply } => {
+                let result = async {
+                    self.state
+                        .borrow()
+                        .core
+                        .authorize_peer_hints(peer)
+                        .map_err(|e| format!("{e:?}"))?;
+                    let (history_revision, _) = self.store.call(|s| s.local_history(0, 0)).await?;
+                    let state = self.state.borrow();
+                    state
+                        .core
+                        .authorize_peer_hints(peer)
+                        .map_err(|e| format!("{e:?}"))?;
+                    Ok((state.core.revision(), history_revision))
+                }
+                .await;
+                let _ = reply.send(result);
+            }
             NetworkEvent::HistoryListQuery {
                 peer,
                 cursor,

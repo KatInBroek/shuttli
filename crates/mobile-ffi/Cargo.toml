@@ -26,6 +26,7 @@ bindgen = ["uniffi/cli"]
 workspace = true
 
 [dependencies]
+shuttli-content.workspace = true
 shuttli-mobile-sdk.workspace = true
 shuttli-model.workspace = true
 hex.workspace = true

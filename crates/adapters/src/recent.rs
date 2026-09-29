@@ -109,9 +109,12 @@ impl RecentHistory {
         Ok(())
     }
     fn remove(&mut self, index: usize) -> Result<()> {
+        let local = self.rows[index].entry.direction == "local";
         Self::discard(&mut self.rows[index])?;
         self.rows.remove(index);
-        self.bump();
+        if local {
+            self.bump();
+        }
         Ok(())
     }
     fn bump(&mut self) {
@@ -217,12 +220,15 @@ impl RecentHistory {
             meta: p.meta.clone(),
             body,
         };
+        let local = row.entry.direction == "local";
         if let Some(index) = index {
             self.rows[index] = row;
         } else {
             self.rows.push_front(row);
         }
-        self.bump();
+        if local {
+            self.bump();
+        }
         self.prune(settings)?;
         Ok(id)
     }
@@ -235,7 +241,7 @@ impl RecentHistory {
             {
                 row.entry.state = state;
                 row.entry.detail = detail.into();
-                changed = true;
+                changed |= row.entry.direction == "local";
             }
         }
         if changed {
@@ -351,7 +357,9 @@ impl RecentHistory {
                 self.remove(index)?;
             } else {
                 if mode == HistoryMode::Status {
-                    if self.rows[index].body.is_some() {
+                    if self.rows[index].entry.direction == "local"
+                        && self.rows[index].body.is_some()
+                    {
                         self.bump();
                     }
                     Self::discard(&mut self.rows[index])?;

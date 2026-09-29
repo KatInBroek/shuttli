@@ -46,3 +46,8 @@
 "transfer_applied" = "Auf Gerät angewendet";
 "transfer_failed" = "Fehlgeschlagen";
 "transfer_unknown" = "Ergebnis unbekannt";
+"this_phone" = "Dieses Telefon";
+"send_again" = "Erneut senden";
+"paste_text" = "Text einfügen";
+"paste_image" = "Bild einfügen";
+"image_too_large" = "Bild ist zu groß oder wird nicht unterstützt";

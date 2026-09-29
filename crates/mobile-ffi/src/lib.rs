@@ -1,12 +1,12 @@
 //! Small, versioned native boundary. Only UI-safe operations cross UniFFI;
 //! authority tickets, TLS state and database handles remain in Rust.
-use sha2::{Digest, Sha256};
 use shuttli_mobile_sdk::{
     Identity, MobileHistory,
     peers::PeerDirectory,
     transport::{MobileTransport, SendCommand, SendResults, SendState},
 };
 use shuttli_model::sync::{EventId, Format, Metadata};
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{
     collections::BTreeMap,
     net::Ipv4Addr,
@@ -42,6 +42,7 @@ pub struct MobileHistoryRow {
     pub kind: MobileContentKind,
     pub bytes: u64,
     pub available: bool,
+    pub is_local: bool,
 }
 
 #[derive(Clone, uniffi::Record)]
@@ -88,6 +89,13 @@ fn parse_event_key(key: &str) -> Option<EventId> {
         epoch: bytes[32..48].try_into().ok()?,
         seq: u64::from_be_bytes(bytes[48..56].try_into().ok()?),
     })
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 #[derive(uniffi::Object)]
@@ -215,6 +223,12 @@ impl MobileSession {
     }
 
     pub fn history_rows(&self) -> Vec<MobileHistoryRow> {
+        let own = self
+            .peers
+            .lock()
+            .expect("mobile peers lock")
+            .as_ref()
+            .map(|peers| peers.lock().expect("mobile directory lock").own_id());
         let names: std::collections::BTreeMap<_, _> = self
             .peers
             .lock()
@@ -247,6 +261,7 @@ impl MobileSession {
                 },
                 bytes: row.summary.metadata.size,
                 available: row.body.is_some(),
+                is_local: own == Some(row.source),
             })
             .collect()
     }
@@ -259,6 +274,7 @@ impl MobileSession {
 
     pub fn clear_history(&self) {
         self.history.lock().expect("mobile session lock").clear();
+        self.results.lock().expect("mobile results lock").clear();
     }
 
     pub fn device_rows(&self) -> Vec<MobileDeviceRow> {
@@ -343,63 +359,61 @@ impl MobileSession {
             })
     }
 
+    pub fn restore_device_directions(&self, peer_id: String, send: bool, receive: bool) -> bool {
+        let Ok(bytes) = hex::decode(peer_id) else {
+            return false;
+        };
+        let Ok(id) = <[u8; 32]>::try_from(bytes) else {
+            return false;
+        };
+        self.peers
+            .lock()
+            .expect("mobile peers lock")
+            .as_ref()
+            .is_some_and(|peers| {
+                peers
+                    .lock()
+                    .expect("mobile directory lock")
+                    .restore_directions(id, shuttli_mobile_sdk::peers::Directions { send, receive })
+            })
+    }
+
     pub fn send_text(&self, text: String) -> u32 {
         if text.is_empty() || text.len() > 1024 * 1024 || text.chars().any(|c| c == '\0') {
             return 0;
         }
-        let listener = self.listener.lock().expect("mobile listener lock");
-        let Some(listener) = listener.as_ref() else {
+        self.send_payload(Format::Text, text.into_bytes().into())
+    }
+
+    pub fn send_image(&self, png_bytes: Vec<u8>) -> u32 {
+        if shuttli_content::canonical_digest(Format::Png, &png_bytes).is_err() {
+            return 0;
+        }
+        self.send_payload(Format::Png, png_bytes.into())
+    }
+
+    pub fn resend_local(&self, key: String) -> u32 {
+        let Some(event) = parse_event_key(&key) else {
             return 0;
         };
-        let directory = self.peers.lock().expect("mobile peers lock");
-        let Some(directory) = directory.as_ref() else {
+        let own = self
+            .peers
+            .lock()
+            .expect("mobile peers lock")
+            .as_ref()
+            .map(|peers| peers.lock().expect("mobile directory lock").own_id());
+        if own != Some(event.origin) {
             return 0;
-        };
-        let directory = directory.lock().expect("mobile directory lock");
-        let targets: Vec<_> = directory
-            .direct()
+        }
+        let row = self
+            .history
+            .lock()
+            .expect("mobile session lock")
+            .timeline()
             .into_iter()
-            .filter(|p| p.online && p.directions.send)
-            .collect();
-        if targets.is_empty() {
-            return 0;
-        }
-        let seq = self.sequence.fetch_add(1, Ordering::SeqCst);
-        if seq == 0 || seq == u64::MAX {
-            return 0;
-        }
-        let event = EventId {
-            origin: directory.own_id(),
-            epoch: listener.epoch(),
-            seq,
-        };
-        let bytes: Arc<[u8]> = text.into_bytes().into();
-        let metadata = Metadata {
-            format: Format::Text,
-            size: bytes.len() as u64,
-            digest: Sha256::digest(&bytes).into(),
-        };
-        let mut queued = 0;
-        let mut results = self.results.lock().expect("mobile results lock");
-        for target in targets {
-            let command = SendCommand {
-                event,
-                target: target.id,
-                metadata: metadata.clone(),
-                body: bytes.clone(),
-            };
-            let state = if listener.enqueue(command) {
-                queued += 1;
-                SendState::Queued
-            } else {
-                SendState::Failed
-            };
-            results.insert((event, target.id), state);
-        }
-        while results.len() > 100 {
-            results.pop_first();
-        }
-        queued
+            .find(|row| row.summary.event == event);
+        row.and_then(|row| row.body.map(|body| (row.summary.metadata.format, body)))
+            .map_or(0, |(format, body)| self.send_payload(format, body))
     }
 
     pub fn transfer_rows(&self) -> Vec<MobileTransferRow> {
@@ -441,6 +455,80 @@ impl MobileSession {
     }
 }
 
+impl MobileSession {
+    fn send_payload(&self, format: Format, bytes: Arc<[u8]>) -> u32 {
+        if !self
+            .history
+            .lock()
+            .expect("mobile session lock")
+            .is_active()
+        {
+            return 0;
+        }
+        let listener = self.listener.lock().expect("mobile listener lock");
+        let Some(listener) = listener.as_ref() else {
+            return 0;
+        };
+        let directory = self.peers.lock().expect("mobile peers lock");
+        let Some(directory) = directory.as_ref() else {
+            return 0;
+        };
+        let directory = directory.lock().expect("mobile directory lock");
+        let targets: Vec<_> = directory
+            .direct()
+            .into_iter()
+            .filter(|p| p.online && p.directions.send)
+            .collect();
+        if targets.is_empty() {
+            return 0;
+        }
+        let seq = self.sequence.fetch_add(1, Ordering::SeqCst);
+        if seq == 0 || seq == u64::MAX {
+            return 0;
+        }
+        let event = EventId {
+            origin: directory.own_id(),
+            epoch: listener.epoch(),
+            seq,
+        };
+        let metadata = Metadata {
+            format,
+            size: bytes.len() as u64,
+            digest: match shuttli_content::canonical_digest(format, &bytes) {
+                Ok(digest) => digest,
+                Err(_) => return 0,
+            },
+        };
+        let mut queued = 0;
+        let mut results = self.results.lock().expect("mobile results lock");
+        for target in targets {
+            let command = SendCommand {
+                event,
+                target: target.id,
+                metadata: metadata.clone(),
+                body: bytes.clone(),
+            };
+            let state = if listener.enqueue(command) {
+                queued += 1;
+                SendState::Queued
+            } else {
+                SendState::Failed
+            };
+            results.insert((event, target.id), state);
+        }
+        while results.len() > 100 {
+            results.pop_first();
+        }
+        drop(results);
+        if queued > 0 {
+            let mut history = self.history.lock().expect("mobile session lock");
+            let generation = history.generation();
+            let _ = history.record_local_sent(generation, event, metadata, bytes, now_ms());
+        }
+        queued
+    }
+}
+
 impl Default for MobileSession {
     fn default() -> Self {
         Self::new()
@@ -450,7 +538,6 @@ impl Default for MobileSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sha2::{Digest, Sha256};
     use shuttli_model::mobile::{HistoryListResponse, HistorySummary};
     use shuttli_model::sync::Metadata;
 
@@ -506,7 +593,7 @@ mod tests {
                         metadata: Metadata {
                             format: Format::Text,
                             size: data.len() as u64,
-                            digest: Sha256::digest(data).into(),
+                            digest: shuttli_content::canonical_digest(Format::Text, data).unwrap(),
                         },
                         copied_at_ms: 1,
                         body_available: true,

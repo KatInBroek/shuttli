@@ -60,6 +60,7 @@ pub struct PeerDirectory {
     own: DeviceId,
     direct: BTreeMap<DeviceId, DirectPeer>,
     hints: BTreeMap<DeviceId, SourceHints>,
+    saved_directions: BTreeMap<DeviceId, Directions>,
 }
 
 impl PeerDirectory {
@@ -68,6 +69,7 @@ impl PeerDirectory {
             own,
             direct: BTreeMap::new(),
             hints: BTreeMap::new(),
+            saved_directions: BTreeMap::new(),
         }
     }
     pub fn own_id(&self) -> DeviceId {
@@ -94,7 +96,9 @@ impl PeerDirectory {
         let directions = self
             .direct
             .get(&id)
-            .map_or_else(Directions::default, |p| p.directions);
+            .map(|p| p.directions)
+            .or_else(|| self.saved_directions.get(&id).copied())
+            .unwrap_or_default();
         self.direct.insert(
             id,
             DirectPeer {
@@ -126,7 +130,24 @@ impl PeerDirectory {
             .get_mut(&id)
             .ok_or(DirectoryError::UnknownSource)?;
         peer.directions = directions;
+        self.saved_directions.insert(id, directions);
         Ok(())
+    }
+
+    /// Restore consent only for an exact public-key identity. Hints cannot
+    /// consume this preference until the peer authenticates directly.
+    pub fn restore_directions(&mut self, id: DeviceId, directions: Directions) -> bool {
+        if id == self.own
+            || self.saved_directions.len() >= MAX_DIRECT_PEERS
+                && !self.saved_directions.contains_key(&id)
+        {
+            return false;
+        }
+        self.saved_directions.insert(id, directions);
+        if let Some(peer) = self.direct.get_mut(&id) {
+            peer.directions = directions;
+        }
+        true
     }
 
     pub fn direct(&self) -> Vec<DirectPeer> {
@@ -320,5 +341,18 @@ mod tests {
                 receive: false
             }
         );
+    }
+
+    #[test]
+    fn restored_consent_requires_exact_direct_identity() {
+        let mut directory = PeerDirectory::new([1; 32]);
+        let id = [2; 32];
+        assert!(directory.restore_directions(id, Directions { send: true, receive: false }));
+        assert!(directory.direct().is_empty());
+        assert!(!directory.restore_directions([1; 32], Directions { send: true, receive: true }));
+        directory.observed_direct(id, "known".into(), "100.64.0.2:45987".into(), Capabilities::desktop()).unwrap();
+        directory.observed_direct([3; 32], "new".into(), "100.64.0.3:45987".into(), Capabilities::desktop()).unwrap();
+        assert_eq!(directory.direct().iter().find(|peer| peer.id == id).unwrap().directions, Directions { send: true, receive: false });
+        assert_eq!(directory.direct().iter().find(|peer| peer.id == [3; 32]).unwrap().directions, Directions::default());
     }
 }

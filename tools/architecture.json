@@ -15,7 +15,8 @@
     "shuttli-mobile-sdk": "mobile-sdk",
     "shuttli-mobile-ffi": "mobile-ffi",
     "shuttli-protocol": "protocol",
-    "shuttli-identity": "identity"
+    "shuttli-identity": "identity",
+    "shuttli-content": "content"
   },
   "reachable_layers": {
     "value": [],
@@ -42,7 +43,8 @@
       "identity",
       "ports",
       "protocol",
-      "value"
+      "value",
+      "content"
     ],
     "runtime": [
       "value",
@@ -66,7 +68,8 @@
       "protocol",
       "runtime",
       "ui",
-      "value"
+      "value",
+      "content"
     ],
     "test": [
       "adapter",
@@ -79,24 +82,30 @@
       "protocol",
       "runtime",
       "ui",
-      "value"
+      "value",
+      "content"
     ],
     "brand": [],
     "mobile-sdk": [
       "identity",
       "protocol",
-      "value"
+      "value",
+      "content"
     ],
     "mobile-ffi": [
       "identity",
       "mobile-sdk",
       "protocol",
-      "value"
+      "value",
+      "content"
     ],
     "protocol": [
       "value"
     ],
     "identity": [
+      "value"
+    ],
+    "content": [
       "value"
     ]
   },
@@ -549,22 +558,27 @@
     ],
     "brand": [],
     "mobile-sdk": [
+      "adler2",
       "asn1-rs",
       "asn1-rs-derive",
       "asn1-rs-impl",
       "autocfg",
+      "bitflags",
       "block-buffer",
       "bytes",
       "cc",
       "cfg-if",
       "cpufeatures",
+      "crc32fast",
       "crypto-common",
       "data-encoding",
       "der-parser",
       "deranged",
       "digest",
       "displaydoc",
+      "fdeflate",
       "find-msvc-tools",
+      "flate2",
       "generic-array",
       "getrandom",
       "itoa",
@@ -572,6 +586,7 @@
       "libc",
       "memchr",
       "minimal-lexical",
+      "miniz_oxide",
       "mio",
       "nom",
       "num-bigint",
@@ -581,6 +596,7 @@
       "oid-registry",
       "once_cell",
       "pin-project-lite",
+      "png",
       "powerfmt",
       "proc-macro2",
       "quote",
@@ -597,6 +613,7 @@
       "serde_json",
       "sha2",
       "shlex",
+      "simd-adler32",
       "socket2",
       "subtle",
       "syn",
@@ -628,9 +645,11 @@
       "x509-parser",
       "yasna",
       "zeroize",
+      "zlib-rs",
       "zmij"
     ],
     "mobile-ffi": [
+      "adler2",
       "anstyle",
       "anyhow",
       "askama",
@@ -654,6 +673,7 @@
       "clap_derive",
       "clap_lex",
       "cpufeatures",
+      "crc32fast",
       "crypto-common",
       "data-encoding",
       "der-parser",
@@ -663,7 +683,9 @@
       "equivalent",
       "errno",
       "fastrand",
+      "fdeflate",
       "find-msvc-tools",
+      "flate2",
       "fs-err",
       "generic-array",
       "getrandom",
@@ -680,6 +702,7 @@
       "log",
       "memchr",
       "minimal-lexical",
+      "miniz_oxide",
       "mio",
       "nom",
       "num-bigint",
@@ -691,6 +714,7 @@
       "percent-encoding",
       "pin-project-lite",
       "plain",
+      "png",
       "powerfmt",
       "proc-macro2",
       "quote",
@@ -714,6 +738,7 @@
       "serde_spanned",
       "sha2",
       "shlex",
+      "simd-adler32",
       "siphasher",
       "smawk",
       "socket2",
@@ -765,6 +790,7 @@
       "x509-parser",
       "yasna",
       "zeroize",
+      "zlib-rs",
       "zmij"
     ],
     "protocol": [
@@ -853,6 +879,37 @@
       "yasna",
       "zeroize",
       "zmij"
+    ],
+    "content": [
+      "adler2",
+      "bitflags",
+      "block-buffer",
+      "cfg-if",
+      "cpufeatures",
+      "crc32fast",
+      "crypto-common",
+      "digest",
+      "fdeflate",
+      "flate2",
+      "generic-array",
+      "getrandom",
+      "libc",
+      "miniz_oxide",
+      "png",
+      "proc-macro2",
+      "quote",
+      "rand_core",
+      "serde",
+      "serde_core",
+      "serde_derive",
+      "sha2",
+      "simd-adler32",
+      "syn",
+      "typenum",
+      "unicode-ident",
+      "version_check",
+      "wasi",
+      "zlib-rs"
     ]
   }
 }

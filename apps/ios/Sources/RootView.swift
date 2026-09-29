@@ -1,5 +1,7 @@
 import SwiftUI
 import ImageIO
+import UIKit
+import UniformTypeIdentifiers
 
 struct RootView: View {
     var body: some View {
@@ -28,14 +30,29 @@ private struct HomeView: View {
                         .foregroundStyle(.secondary)
                 }
                 Section("send_from_phone") {
+                    Text("paste_text").foregroundStyle(.secondary)
                     PasteButton(payloadType: String.self) { strings in
                         if let text = strings.first { state.importText(text) }
                     }
                     .buttonStyle(.borderedProminent)
+                    Text("paste_image").foregroundStyle(.secondary)
+                    PasteButton(supportedContentTypes: [.image]) { providers in
+                        guard let provider = providers.first else { return }
+                        _ = provider.loadObject(ofClass: UIImage.self) { object, _ in
+                            guard let image = object as? UIImage else { return }
+                            Task { @MainActor in state.importImage(image) }
+                        }
+                    }
+                    .buttonStyle(.bordered)
                     if let draft = state.draft {
                         Text(draft)
                             .lineLimit(5)
                             .textSelection(.enabled)
+                    }
+                    if let image = state.imageDraft, let thumbnail = SafeImage.thumbnail(image) {
+                        Image(decorative: thumbnail, scale: 1).resizable().scaledToFit().frame(maxHeight: 180)
+                    }
+                    if state.draft != nil || state.imageDraft != nil {
                         Button("send_to_devices") { state.sendDraft() }
                             .disabled(state.allowedSendCount == 0)
                     }
@@ -52,13 +69,6 @@ private struct HomeView: View {
                         }
                     }
                 }
-                if !state.transferRows.isEmpty {
-                    Section("sent_from_phone") {
-                        ForEach(state.transferRows.prefix(3), id: \.uniqueID) { transfer in
-                            TransferRowView(row: transfer)
-                        }
-                    }
-                }
             }
             .navigationTitle(Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "")
         }
@@ -71,19 +81,12 @@ private struct HistoryView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if state.historyRows.isEmpty && state.transferRows.isEmpty {
+                if state.historyRows.isEmpty {
                     EmptyState(symbol: "clock", title: "history_empty", detail: "history_help")
                 } else {
                     List {
                         ForEach(state.historyRows, id: \.eventKey) { row in
                             HistoryRowLink(row: row)
-                        }
-                        if !state.transferRows.isEmpty {
-                            Section("sent_from_phone") {
-                                ForEach(state.transferRows, id: \.uniqueID) { transfer in
-                                    TransferRowView(row: transfer)
-                                }
-                            }
                         }
                     }
                 }
@@ -115,10 +118,6 @@ private struct TransferRowView: View {
     }
 }
 
-private extension MobileTransferRow {
-    var uniqueID: String { eventKey + targetId }
-}
-
 private struct HistoryRowLink: View {
     let row: MobileHistoryRow
 
@@ -128,7 +127,8 @@ private struct HistoryRowLink: View {
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 Label(row.kind == .text ? "text_item" : "image_item", systemImage: row.kind == .text ? "text.alignleft" : "photo")
-                Text(row.sourceName).font(.subheadline).foregroundStyle(.secondary)
+                Text(row.isLocal ? LocalizedStringKey("this_phone") : LocalizedStringKey(row.sourceName))
+                    .font(.subheadline).foregroundStyle(.secondary)
                 Text(Date(timeIntervalSince1970: Double(row.copiedAtMs) / 1000).formatted(date: .abbreviated, time: .shortened))
                     .font(.caption).foregroundStyle(.secondary)
                 Text(row.available ? "item_available" : "item_listed")
@@ -146,7 +146,7 @@ private struct HistoryDetailView: View {
     var body: some View {
         List {
             Section {
-                LabeledContent("source", value: row.sourceName)
+                LabeledContent("source", value: row.isLocal ? String(localized: "this_phone") : row.sourceName)
                 LabeledContent("size", value: ByteCountFormatter.string(fromByteCount: Int64(row.bytes), countStyle: .file))
             }
             Section("preview") {
@@ -168,6 +168,18 @@ private struct HistoryDetailView: View {
                     .disabled(!row.available || data.isEmpty)
                 if let status = state.copyStatusKey {
                     Text(LocalizedStringKey(status)).foregroundStyle(.secondary)
+                }
+            }
+            if row.isLocal {
+                Section("sent_from_phone") {
+                    ForEach(state.transferRows.filter { $0.eventKey == row.eventKey }, id: \.targetId) { transfer in
+                        TransferRowView(row: transfer)
+                    }
+                    Button("send_again") { state.resend(row) }
+                        .disabled(!row.available || state.allowedSendCount == 0)
+                    if let status = state.sendStatusKey {
+                        Text(LocalizedStringKey(status)).foregroundStyle(.secondary)
+                    }
                 }
             }
         }

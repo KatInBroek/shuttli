@@ -2,7 +2,6 @@
 //! this crate never reads the OS clipboard or persists fetched content.
 pub mod peers;
 pub mod transport;
-use sha2::{Digest, Sha256};
 pub use shuttli_identity::Identity;
 use shuttli_model::{
     mobile::{HistoryListResponse, HistorySummary, MAX_HISTORY_PAGE},
@@ -160,11 +159,51 @@ impl MobileHistory {
         let row = self.rows.get_mut(&event).ok_or(HistoryError::Missing)?;
         if !row.summary.body_available
             || bytes.len() as u64 != row.summary.metadata.size
-            || Sha256::digest(&bytes).as_slice() != row.summary.metadata.digest
+            || shuttli_content::canonical_digest(row.summary.metadata.format, &bytes).ok()
+                != Some(row.summary.metadata.digest)
         {
             return Err(HistoryError::InvalidBody);
         }
         row.body = Some(bytes.into());
+        self.trim();
+        Ok(())
+    }
+    /// Called only after an explicit phone send. A new event is kept separate
+    /// from identical earlier copies and remains available for manual resend.
+    pub fn record_local_sent(
+        &mut self,
+        generation: u64,
+        event: EventId,
+        metadata: shuttli_model::sync::Metadata,
+        body: Arc<[u8]>,
+        copied_at_ms: u64,
+    ) -> Result<(), HistoryError> {
+        if !self.active || generation != self.generation {
+            return Err(HistoryError::Background);
+        }
+        if event.seq == 0
+            || body.is_empty()
+            || body.len() > 8 * 1024 * 1024
+            || metadata.size != body.len() as u64
+            || shuttli_content::canonical_digest(metadata.format, &body).ok()
+                != Some(metadata.digest)
+            || self.rows.contains_key(&event)
+        {
+            return Err(HistoryError::InvalidBody);
+        }
+        self.rows.insert(
+            event,
+            TimelineItem {
+                source: event.origin,
+                summary: HistorySummary {
+                    event,
+                    metadata,
+                    copied_at_ms,
+                    body_available: true,
+                },
+                body: Some(body),
+            },
+        );
         self.trim();
         Ok(())
     }
@@ -224,7 +263,7 @@ mod tests {
                 metadata: Metadata {
                     format: Format::Text,
                     size: text.len() as u64,
-                    digest: Sha256::digest(text).into(),
+                    digest: shuttli_content::canonical_digest(Format::Text, text).unwrap(),
                 },
                 copied_at_ms: 100,
                 body_available: true,
@@ -317,6 +356,50 @@ mod tests {
         assert!(history.body_for_explicit_copy(event).is_some());
         history.merge_page(generation, source, status, 3).unwrap();
         assert!(history.body_for_explicit_copy(event).is_none());
+    }
+
+    #[test]
+    fn local_manual_sends_keep_separate_events_and_can_be_resubmitted() {
+        let mut history = MobileHistory::default();
+        let generation = history.enter_foreground();
+        let body: Arc<[u8]> = Arc::from(&b"again"[..]);
+        let metadata = Metadata {
+            format: Format::Text,
+            size: body.len() as u64,
+            digest: shuttli_content::canonical_digest(Format::Text, &body).unwrap(),
+        };
+        for seq in [1, 2] {
+            history
+                .record_local_sent(
+                    generation,
+                    EventId {
+                        origin: [1; 32],
+                        epoch: [2; 16],
+                        seq,
+                    },
+                    metadata.clone(),
+                    body.clone(),
+                    seq,
+                )
+                .unwrap();
+        }
+        assert_eq!(history.timeline().len(), 2);
+        history.enter_background();
+        assert!(
+            history
+                .record_local_sent(
+                    generation,
+                    EventId {
+                        origin: [1; 32],
+                        epoch: [2; 16],
+                        seq: 3
+                    },
+                    metadata,
+                    body,
+                    3
+                )
+                .is_err()
+        );
     }
 
     #[test]

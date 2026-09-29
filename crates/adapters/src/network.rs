@@ -651,6 +651,13 @@ async fn can_send_hints(s: &Shared, peer: DeviceId) -> Result<u64> {
         .map_err(|_| "application busy")?;
     application_reply(rx).await
 }
+async fn visible_history_revision(s: &Shared, peer: DeviceId) -> Result<(u64, u64)> {
+    let (reply, rx) = mpsc::sync_channel(1);
+    s.events
+        .try_send(NetworkEvent::HistoryRevisionQuery { peer, reply })
+        .map_err(|_| "application busy")?;
+    application_reply(rx).await
+}
 async fn direct_roster(s: &Shared, receiver: DeviceId) -> Vec<PeerHint> {
     s.sessions
         .lock()
@@ -680,6 +687,7 @@ async fn serve_v2_session(
         .capabilities;
     let mut last_roster: Option<Vec<PeerHint>> = None;
     let mut roster_revision = 0u64;
+    let mut last_history_revision: Option<(u64, u64)> = None;
     let mut next_roster_check = Instant::now();
     while live.load(Ordering::SeqCst) {
         if !capabilities.accept_live_offer {
@@ -712,6 +720,23 @@ async fn serve_v2_session(
                     }
                 }
                 _ => last_roster = None,
+            }
+            if capabilities.history_change {
+                match visible_history_revision(s, id).await {
+                    Ok(current) if current.0 == s.revision.load(Ordering::SeqCst) => {
+                        if last_history_revision != Some(current) {
+                            write_v2_frame(
+                                tls,
+                                &FrameV2::HistoryChanged {
+                                    revision: current.1,
+                                },
+                            )
+                            .await?;
+                            last_history_revision = Some(current);
+                        }
+                    }
+                    _ => last_history_revision = None,
+                }
             }
         }
         let frame = match timeout(Duration::from_secs(5), read_v2_frame(tls)).await {
@@ -1294,6 +1319,9 @@ mod tests {
                     NetworkEvent::PeerHintsPermission { reply, .. } => {
                         let _ = reply.send(Ok(1));
                     }
+                    NetworkEvent::HistoryRevisionQuery { reply, .. } => {
+                        let _ = reply.send(Ok((1, 1)));
+                    }
                     NetworkEvent::HistoryListQuery { reply, .. } => {
                         let _ = reply.send(Ok((1, response.clone())));
                     }
@@ -1314,6 +1342,10 @@ mod tests {
         assert!(
             matches!(read_v2_frame(&mut client).await.unwrap(), FrameV2::PeerList { revision: 1, peers } if peers.is_empty())
         );
+        assert!(matches!(
+            read_v2_frame(&mut client).await.unwrap(),
+            FrameV2::HistoryChanged { revision: 1 }
+        ));
         write_v2_frame(
             &mut client,
             &FrameV2::HistoryListRequest {
