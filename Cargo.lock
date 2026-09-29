@@ -1023,6 +1023,7 @@ dependencies = [
  "sha2",
  "shuttli-brand",
  "shuttli-core",
+ "shuttli-identity",
  "shuttli-model",
  "shuttli-ports",
  "tokio",
@@ -1100,6 +1101,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "shuttli-identity"
+version = "0.1.1"
+dependencies = [
+ "rcgen",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2",
+ "shuttli-model",
+ "x509-parser",
+]
+
+[[package]]
 name = "shuttli-mobile-ffi"
 version = "0.1.1"
 dependencies = [
@@ -1112,7 +1126,9 @@ name = "shuttli-mobile-sdk"
 version = "0.1.1"
 dependencies = [
  "sha2",
+ "shuttli-identity",
  "shuttli-model",
+ "shuttli-protocol",
 ]
 
 [[package]]

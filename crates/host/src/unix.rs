@@ -1,5 +1,5 @@
 use shuttli_adapters::{
-    clipboard, files, identity::Identity, network::TailscaleNetwork, platform::NativePlatform,
+    clipboard, files, identity, network::TailscaleNetwork, platform::NativePlatform,
     storage::SqlStore,
 };
 use shuttli_api::control::{Answer, ControlApi, ControlRequest};
@@ -150,7 +150,7 @@ fn daemon(dir: PathBuf) -> Result<u8, String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error.to_string()),
     }
-    let identity = Identity::load(&dir)?;
+    let identity = identity::load(&dir)?;
     let id = identity.id;
     // Random restart epoch from the OS provider; no epoch is compared by magnitude.
     let epoch = shuttli_adapters::random_epoch()?;

@@ -1,6 +1,8 @@
 //! Session-only mobile history. Network adapters supply authenticated pages;
 //! this crate never reads the OS clipboard or persists fetched content.
+pub mod peers;
 use sha2::{Digest, Sha256};
+pub use shuttli_identity::Identity;
 use shuttli_model::{
     mobile::{HistoryListResponse, HistorySummary, MAX_HISTORY_PAGE},
     sync::{DeviceId, EventId},

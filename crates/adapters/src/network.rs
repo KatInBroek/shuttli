@@ -980,7 +980,7 @@ mod delivery_tests {
         let random = crate::random_epoch().unwrap();
         let dir = std::env::temp_dir().join(format!("shuttli-delivery-{random:?}"));
         std::fs::create_dir_all(&dir).unwrap();
-        let identity = Arc::new(Identity::load(&dir).unwrap());
+        let identity = Arc::new(crate::identity::load(&dir).unwrap());
         std::fs::remove_dir_all(dir).unwrap();
         let (events, receiver) = tokio::sync::mpsc::channel(64);
         let shared = Arc::new(Shared {

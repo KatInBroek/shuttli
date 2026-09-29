@@ -1,5 +1,5 @@
 [package]
-name = "shuttli-mobile-sdk"
+name = "shuttli-identity"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,13 +8,16 @@ repository.workspace = true
 publish.workspace = true
 
 [package.metadata.shuttli]
-layer = "mobile-sdk"
+layer = "identity"
 
 [lints]
 workspace = true
 
 [dependencies]
 shuttli-model.workspace = true
-shuttli-protocol = { path = "../protocol" }
-shuttli-identity.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
+rustls.workspace = true
+rcgen.workspace = true
+x509-parser.workspace = true

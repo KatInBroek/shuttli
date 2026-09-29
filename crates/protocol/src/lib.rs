@@ -231,7 +231,7 @@ pub fn valid_peer_list(list: &PeerList, sender: DeviceId, receiver: DeviceId) ->
     })
 }
 
-fn valid_endpoint(endpoint: &str) -> bool {
+pub fn valid_endpoint(endpoint: &str) -> bool {
     if endpoint.len() > 256 {
         return false;
     }
