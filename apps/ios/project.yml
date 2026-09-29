@@ -1,0 +1,31 @@
+name: Shuttli
+options:
+  minimumXcodeGenVersion: 2.40.0
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    PRODUCT_BUNDLE_IDENTIFIER: org.katinbroek.shuttli
+    GENERATE_INFOPLIST_FILE: YES
+    INFOPLIST_KEY_CFBundleDisplayName: $(SHUTTLI_PRODUCT_NAME)
+    INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+    TARGETED_DEVICE_FAMILY: "1,2"
+    CODE_SIGNING_ALLOWED: NO
+configFiles:
+  Debug: Generated/Brand.xcconfig
+  Release: Generated/Brand.xcconfig
+targets:
+  Shuttli:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+      - Generated/shuttli_mobile_ffi.swift
+    dependencies:
+      - framework: Generated/ShuttliMobile.xcframework
+        embed: false
+    settings:
+      base:
+        SWIFT_STRICT_CONCURRENCY: minimal

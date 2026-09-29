@@ -1,0 +1,13 @@
+"home" = "Start";
+"history" = "Geschiedenis";
+"devices" = "Apparaten";
+"settings" = "Instellingen";
+"no_connected_devices" = "Geen verbonden apparaten";
+"connect_help" = "Open de app terwijl Tailscale verbonden is. Een toegestaan apparaat vindt deze telefoon.";
+"send_from_phone" = "Vanaf deze telefoon verzenden";
+"send_to_devices" = "Naar apparaten verzenden";
+"recent_history" = "Recente geschiedenis";
+"history_empty" = "Geen recente kopieën";
+"history_help" = "Recente kopieën van toegestane computers verschijnen hier zolang de app open is.";
+"privacy" = "Privacy";
+"manual_clipboard_help" = "Het klembord wordt alleen gelezen wanneer je op Plakken tikt. Ontvangen items komen er pas in wanneer je Kopiëren kiest.";

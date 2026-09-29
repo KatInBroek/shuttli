@@ -7,3 +7,5 @@ __pycache__/
 /.local/
 /project-memory/
 *local-hosts*.json
+/apps/ios/Generated/
+/apps/ios/Shuttli.xcodeproj/

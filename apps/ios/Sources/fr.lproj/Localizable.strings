@@ -1,0 +1,13 @@
+"home" = "Accueil";
+"history" = "Historique";
+"devices" = "Appareils";
+"settings" = "Réglages";
+"no_connected_devices" = "Aucun appareil connecté";
+"connect_help" = "Ouvrez l’application avec Tailscale connecté. Un ordinateur autorisé trouvera ce téléphone.";
+"send_from_phone" = "Envoyer depuis ce téléphone";
+"send_to_devices" = "Envoyer aux appareils";
+"recent_history" = "Historique récent";
+"history_empty" = "Aucune copie récente";
+"history_help" = "Les copies récentes des ordinateurs autorisés apparaissent ici lorsque l’application est ouverte.";
+"privacy" = "Confidentialité";
+"manual_clipboard_help" = "Le presse-papiers est lu uniquement après avoir touché Coller. Un élément reçu y est copié seulement sur votre demande.";

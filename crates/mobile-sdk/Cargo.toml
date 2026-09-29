@@ -1,0 +1,18 @@
+[package]
+name = "shuttli-mobile-sdk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[package.metadata.shuttli]
+layer = "mobile-sdk"
+
+[lints]
+workspace = true
+
+[dependencies]
+shuttli-model.workspace = true
+sha2.workspace = true

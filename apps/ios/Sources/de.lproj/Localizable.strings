@@ -1,0 +1,13 @@
+"home" = "Start";
+"history" = "Verlauf";
+"devices" = "Geräte";
+"settings" = "Einstellungen";
+"no_connected_devices" = "Keine verbundenen Geräte";
+"connect_help" = "Öffne die App, während Tailscale verbunden ist. Ein zugelassener Computer findet dieses Telefon.";
+"send_from_phone" = "Von diesem Telefon senden";
+"send_to_devices" = "An Geräte senden";
+"recent_history" = "Letzter Verlauf";
+"history_empty" = "Keine neuen Kopien";
+"history_help" = "Neue Kopien von zugelassenen Computern erscheinen hier, solange die App geöffnet ist.";
+"privacy" = "Datenschutz";
+"manual_clipboard_help" = "Die Zwischenablage wird nur gelesen, wenn du auf Einfügen tippst. Empfangene Inhalte werden erst durch Kopieren hineingeschrieben.";

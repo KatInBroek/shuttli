@@ -1,6 +1,6 @@
 # Shared mobile SDK and desktop-assisted discovery
 
-Status: proposed, not implemented. The [mobile feature specification](feature-spec.md) owns product requirements. Track [shared SDK #50](https://github.com/KatInBroek/shuttli/issues/50), [iOS #51](https://github.com/KatInBroek/shuttli/issues/51) and [Android #52](https://github.com/KatInBroek/shuttli/issues/52).
+Status: implementation in progress; protocol, transport and device acceptance remain pending. The [mobile feature specification](feature-spec.md) owns product requirements. Track [shared SDK #50](https://github.com/KatInBroek/shuttli/issues/50), [iOS #51](https://github.com/KatInBroek/shuttli/issues/51) and [Android #52](https://github.com/KatInBroek/shuttli/issues/52).
 
 ## Scope
 

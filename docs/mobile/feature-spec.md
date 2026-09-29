@@ -1,6 +1,6 @@
 # Mobile feature specification
 
-Status: proposed. No iOS or Android app, mobile SDK, or mobile history protocol is implemented or device-validated yet. This is the product requirement source for [shared SDK #50](https://github.com/KatInBroek/shuttli/issues/50), [iOS #51](https://github.com/KatInBroek/shuttli/issues/51), and [Android #52](https://github.com/KatInBroek/shuttli/issues/52). The [shared SDK](shared-sdk.md), [iOS](ios.md), and [Android](android.md) specifications define technical and platform acceptance details.
+Status: implementation in progress; mobile protocol, app behavior and real-device acceptance remain incomplete. This is the product requirement source for [shared SDK #50](https://github.com/KatInBroek/shuttli/issues/50), [iOS #51](https://github.com/KatInBroek/shuttli/issues/51), and [Android #52](https://github.com/KatInBroek/shuttli/issues/52). The [shared SDK](shared-sdk.md), [iOS](ios.md), and [Android](android.md) specifications define technical and platform acceptance details.
 
 ## Goal and operating model
 

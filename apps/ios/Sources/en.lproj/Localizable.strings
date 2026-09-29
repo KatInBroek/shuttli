@@ -1,0 +1,13 @@
+"home" = "Home";
+"history" = "History";
+"devices" = "Devices";
+"settings" = "Settings";
+"no_connected_devices" = "No connected devices";
+"connect_help" = "Open the app while Tailscale is connected. A permitted computer will find this phone.";
+"send_from_phone" = "Send from this phone";
+"send_to_devices" = "Send to devices";
+"recent_history" = "Recent history";
+"history_empty" = "No recent copies";
+"history_help" = "Recent copies from permitted computers appear here while this app is open.";
+"privacy" = "Privacy";
+"manual_clipboard_help" = "Your phone clipboard is read only when you tap Paste. Received items are copied to it only when you choose Copy.";
