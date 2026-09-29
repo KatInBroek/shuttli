@@ -66,6 +66,7 @@ class MobileAppState(private val app: Application) {
             lifecycle.withLock {
                 if (active) return@withLock
                 active = true
+                session.configureImageCache(app.cacheDir.absolutePath)
                 val settings = HistorySettingsStore.load(app)
                 session.setHistoryMode(settings.mode)
                 session.setHistoryLimit(settings.limit.toUInt())

@@ -1,10 +1,10 @@
 # Android foreground app specification
 
-Status: Android app and shared SDK implemented; emulator tests and unsigned packages pass, but real-device Tailscale and cross-app acceptance remains pending. The [mobile feature specification](feature-spec.md) owns product requirements. [Issue #52](https://github.com/KatInBroek/shuttli/issues/52). Prerequisite: [shared SDK](shared-sdk.md); [iOS specification](ios.md) is independent.
+Status: Android app and shared SDK implemented; emulator tests and unsigned APK/AAB packages pass, but real-device Tailscale acceptance remains pending. The [mobile feature specification](feature-spec.md) owns product requirements. [Issue #52](https://github.com/KatInBroek/shuttli/issues/52). Prerequisite: [shared SDK](shared-sdk.md); [iOS specification](ios.md) is independent.
 
 ## Scope and platform
 
-Use Kotlin/Jetpack Compose with UniFFI bindings to the shared Rust SDK. Proposed minSdk 29 must be confirmed in the build spike; fix target/compile SDK against implementation and distribution requirements. Prioritize phones; tablet/foldable layouts are separate work.
+Use Kotlin/Jetpack Compose with UniFFI bindings to the shared Rust SDK. The current build uses minSdk 29 and target/compile SDK 36. Prioritize phones; tablet/foldable layouts are separate work.
 
 Use the official external Tailscale client, not an embedded VpnService. Support foreground discovery, explicit text/image import/send, recent multi-computer history queries and incremental updates, manual local copy, per-device send/receive consent and four languages. The phone UI has no global direction switches. Do not require a foreground service, background clipboard listener, default IME, accessibility service, root/Shizuku, persistent notification, wake lock or battery-optimization exemption. Share intents, files, LAN, phone-only discovery, FCM, cloud accounts and autostart are outside this first delivery.
 
@@ -84,6 +84,6 @@ Depend on M01-M05, not iOS UI completion. Aim to test a near-stock device and a 
 | AND-14 | Offline-phone copies from two desktops currently allowed to send merge on opening without earlier delivery attempts; new retained local copies appear incrementally while foreground, with duplicate event IDs collapsed but separate identical copies preserved. |
 | AND-15 | Every permitted `peer_hints` computer sends its own snapshot; multi-source hints merge by public-key identity with source/expiry tracking. Connection or permission enable produces a snapshot, peer join/leave updates it, and reconnect refreshes it. Each suggested source is verified directly and returns history only under its own send policy. Fetching/previewing never changes the Android clipboard or relays content; no platform-kind flag drives policy. |
 
-All mobile acceptance remains pending. Keep device/vendor/version/configuration and synthetic reproduction evidence outside the repository. Rust coverage and emulator builds do not substitute for device acceptance.
+Real-device mobile acceptance remains pending. Keep device/vendor/version/configuration and synthetic reproduction evidence outside the repository. Rust coverage and emulator builds do not substitute for device acceptance.
 
 References: [Android clipboard restrictions](https://developer.android.com/about/versions/10/privacy/changes#clipboard-data), [Tailscale split tunneling](https://tailscale.com/docs/features/client/android-app-split-tunneling).

@@ -30,7 +30,7 @@ for mapping in aarch64-linux-android:arm64-v8a x86_64-linux-android:x86_64; do
     mkdir -p "$dest"
     cp "target/$target/release/libshuttli_mobile_ffi.so" "$dest/"
 done
-(cd apps/android && ./gradlew --no-daemon --stacktrace testDebugUnitTest assembleDebug assembleRelease)
+(cd apps/android && ./gradlew --no-daemon --stacktrace testDebugUnitTest assembleDebug assembleRelease bundleRelease)
 python3 - "$repo_dir" <<'PY'
 import hashlib
 import json
@@ -42,6 +42,7 @@ repo = Path(sys.argv[1])
 files = {
     "debug_apk": repo / "apps/android/app/build/outputs/apk/debug/app-debug.apk",
     "unsigned_release_apk": repo / "apps/android/app/build/outputs/apk/release/app-release-unsigned.apk",
+    "unsigned_release_bundle": repo / "apps/android/app/build/outputs/bundle/release/app-release.aab",
     "arm64_library": repo / "apps/android/app/src/main/jniLibs/arm64-v8a/libshuttli_mobile_ffi.so",
     "x86_64_library": repo / "apps/android/app/src/main/jniLibs/x86_64/libshuttli_mobile_ffi.so",
     "cargo_lock": repo / "Cargo.lock",
@@ -50,7 +51,7 @@ out = repo / "target/mobile-android"
 out.mkdir(parents=True, exist_ok=True)
 manifest = {
     "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip(),
-    "sdk_api": 3,
+    "sdk_api": 4,
     "wire_version": 2,
     "min_sdk": 29,
     "target_sdk": 36,

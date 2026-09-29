@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::{
     collections::BTreeMap,
     net::Ipv4Addr,
+    path::Path,
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
@@ -20,7 +21,7 @@ uniffi::setup_scaffolding!();
 
 #[uniffi::export]
 pub fn sdk_api_version() -> u32 {
-    3
+    4
 }
 
 #[uniffi::export]
@@ -257,6 +258,17 @@ impl MobileSession {
             .into()
     }
 
+    pub fn configure_image_cache(&self, cache_directory: String) -> bool {
+        if cache_directory.is_empty() || cache_directory.len() > 4096 {
+            return false;
+        }
+        self.history
+            .lock()
+            .expect("mobile session lock")
+            .configure_image_cache(Path::new(&cache_directory))
+            .is_ok()
+    }
+
     pub fn history_limit(&self) -> u32 {
         self.history.lock().expect("mobile session lock").limit() as u32
     }
@@ -458,15 +470,18 @@ impl MobileSession {
         if own != Some(event.origin) {
             return 0;
         }
-        let row = self
-            .history
-            .lock()
-            .expect("mobile session lock")
+        let history = self.history.lock().expect("mobile session lock");
+        let row = history
             .timeline()
             .into_iter()
             .find(|row| row.summary.event == event);
-        row.and_then(|row| row.body.map(|body| (row.summary.metadata.format, body)))
-            .map_or(0, |(format, body)| self.send_payload(format, body))
+        let payload = row.and_then(|row| {
+            history
+                .body_for_explicit_copy(event)
+                .map(|body| (row.summary.metadata.format, body))
+        });
+        drop(history);
+        payload.map_or(0, |(format, body)| self.send_payload(format, body))
     }
 
     pub fn transfer_rows(&self) -> Vec<MobileTransferRow> {
@@ -597,7 +612,7 @@ mod tests {
     #[test]
     fn native_bridge_preserves_one_session_across_lifecycle() {
         let session = MobileSession::new();
-        assert_eq!(sdk_api_version(), 3);
+        assert_eq!(sdk_api_version(), 4);
         let first = session.enter_foreground();
         session.enter_background();
         assert!(session.enter_foreground() > first);

@@ -48,6 +48,9 @@ final class AppState: ObservableObject {
     func enterForeground() {
         refreshTask?.cancel()
         _ = session.enterForeground()
+        if let cacheDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            _ = session.configureImageCache(cacheDirectory: cacheDirectory.path)
+        }
         let settings = HistorySettingsStore.load()
         historyModeKey = settings.mode
         historyLimit = settings.limit
