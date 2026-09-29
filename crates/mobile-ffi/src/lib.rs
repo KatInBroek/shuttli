@@ -1,7 +1,7 @@
 //! Small, versioned native boundary. Only UI-safe operations cross UniFFI;
 //! authority tickets, TLS state and database handles remain in Rust.
 use shuttli_mobile_sdk::{
-    Identity, MobileHistory,
+    HistoryMode, Identity, MobileHistory,
     peers::PeerDirectory,
     transport::{MobileTransport, SendCommand, SendResults, SendState},
 };
@@ -20,7 +20,7 @@ uniffi::setup_scaffolding!();
 
 #[uniffi::export]
 pub fn sdk_api_version() -> u32 {
-    2
+    3
 }
 
 #[uniffi::export]
@@ -32,6 +32,33 @@ pub fn generate_identity_bytes() -> Vec<u8> {
 pub enum MobileContentKind {
     Text,
     Image,
+}
+
+#[derive(Clone, uniffi::Enum)]
+pub enum MobileHistoryMode {
+    Off,
+    Status,
+    Content,
+}
+
+impl From<MobileHistoryMode> for HistoryMode {
+    fn from(value: MobileHistoryMode) -> Self {
+        match value {
+            MobileHistoryMode::Off => Self::Off,
+            MobileHistoryMode::Status => Self::Status,
+            MobileHistoryMode::Content => Self::Content,
+        }
+    }
+}
+
+impl From<HistoryMode> for MobileHistoryMode {
+    fn from(value: HistoryMode) -> Self {
+        match value {
+            HistoryMode::Off => Self::Off,
+            HistoryMode::Status => Self::Status,
+            HistoryMode::Content => Self::Content,
+        }
+    }
 }
 
 #[derive(Clone, uniffi::Record)]
@@ -220,6 +247,32 @@ impl MobileSession {
             .expect("mobile session lock")
             .timeline()
             .len() as u32
+    }
+
+    pub fn history_mode(&self) -> MobileHistoryMode {
+        self.history
+            .lock()
+            .expect("mobile session lock")
+            .mode()
+            .into()
+    }
+
+    pub fn history_limit(&self) -> u32 {
+        self.history.lock().expect("mobile session lock").limit() as u32
+    }
+
+    pub fn set_history_mode(&self, mode: MobileHistoryMode) {
+        self.history
+            .lock()
+            .expect("mobile session lock")
+            .set_mode(mode.into());
+    }
+
+    pub fn set_history_limit(&self, limit: u32) -> bool {
+        self.history
+            .lock()
+            .expect("mobile session lock")
+            .set_limit(limit as usize)
     }
 
     pub fn history_rows(&self) -> Vec<MobileHistoryRow> {
@@ -544,7 +597,7 @@ mod tests {
     #[test]
     fn native_bridge_preserves_one_session_across_lifecycle() {
         let session = MobileSession::new();
-        assert_eq!(sdk_api_version(), 2);
+        assert_eq!(sdk_api_version(), 3);
         let first = session.enter_foreground();
         session.enter_background();
         assert!(session.enter_foreground() > first);

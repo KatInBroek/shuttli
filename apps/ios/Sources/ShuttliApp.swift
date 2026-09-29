@@ -37,14 +37,22 @@ final class AppState: ObservableObject {
     @Published private(set) var transferRows: [MobileTransferRow] = []
     @Published private(set) var sendStatusKey: String?
     @Published private(set) var copyStatusKey: String?
+    @Published private(set) var settingsStatusKey: String?
     @Published private(set) var connectedPeerCount: UInt32 = 0
     @Published private(set) var connectionStatusKey = "waiting_for_devices"
+    @Published private(set) var historyModeKey = "content"
+    @Published private(set) var historyLimit = 20
     private let session = MobileSession()
     private var refreshTask: Task<Void, Never>?
 
     func enterForeground() {
         refreshTask?.cancel()
         _ = session.enterForeground()
+        let settings = HistorySettingsStore.load()
+        historyModeKey = settings.mode
+        historyLimit = settings.limit
+        session.setHistoryMode(mode: nativeMode(settings.mode))
+        _ = session.setHistoryLimit(limit: UInt32(settings.limit))
         guard let identity = DeviceIdentityStore.loadOrCreate() else {
             connectionStatusKey = "identity_unavailable"
             return
@@ -117,6 +125,8 @@ final class AppState: ObservableObject {
     func setReceive(_ enabled: Bool, for row: MobileDeviceRow) {
         if DevicePolicyStore.save(id: row.id, send: row.send, receive: enabled) {
             _ = session.setReceive(peerId: row.id, enabled: enabled)
+        } else {
+            settingsStatusKey = "settings_unavailable"
         }
         updateSnapshot()
     }
@@ -124,7 +134,33 @@ final class AppState: ObservableObject {
     func setSend(_ enabled: Bool, for row: MobileDeviceRow) {
         if DevicePolicyStore.save(id: row.id, send: enabled, receive: row.receive) {
             _ = session.setSend(peerId: row.id, enabled: enabled)
+        } else {
+            settingsStatusKey = "settings_unavailable"
         }
+        updateSnapshot()
+    }
+
+    private func nativeMode(_ value: String) -> MobileHistoryMode {
+        switch value {
+        case "off": .off
+        case "status": .status
+        default: .content
+        }
+    }
+
+    func setHistoryMode(_ mode: String) {
+        let value = HistorySettings(mode: mode, limit: historyLimit)
+        guard HistorySettingsStore.save(value) else { settingsStatusKey = "settings_unavailable"; return }
+        session.setHistoryMode(mode: nativeMode(mode))
+        historyModeKey = mode
+        updateSnapshot()
+    }
+
+    func setHistoryLimit(_ limit: Int) {
+        let value = HistorySettings(mode: historyModeKey, limit: limit)
+        guard HistorySettingsStore.save(value) else { settingsStatusKey = "settings_unavailable"; return }
+        guard session.setHistoryLimit(limit: UInt32(limit)) else { return }
+        historyLimit = limit
         updateSnapshot()
     }
 

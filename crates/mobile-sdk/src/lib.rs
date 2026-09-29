@@ -32,15 +32,24 @@ pub struct SourceFreshness {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HistoryError {
     Background,
+    Disabled,
     InvalidPage,
     Missing,
     InvalidBody,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HistoryMode {
+    Off,
+    Status,
+    Content,
 }
 
 pub struct MobileHistory {
     active: bool,
     generation: u64,
     limit: usize,
+    mode: HistoryMode,
     rows: BTreeMap<EventId, TimelineItem>,
     freshness: BTreeMap<DeviceId, SourceFreshness>,
 }
@@ -57,6 +66,7 @@ impl MobileHistory {
             active: false,
             generation: 0,
             limit: limit.min(10_000),
+            mode: HistoryMode::Content,
             rows: BTreeMap::new(),
             freshness: BTreeMap::new(),
         }
@@ -76,6 +86,37 @@ impl MobileHistory {
     pub fn is_active(&self) -> bool {
         self.active
     }
+    pub fn mode(&self) -> HistoryMode {
+        self.mode
+    }
+    pub fn limit(&self) -> usize {
+        self.limit
+    }
+    pub fn query_enabled(&self) -> bool {
+        self.active && self.limit > 0 && self.mode != HistoryMode::Off
+    }
+    pub fn wants_body(&self) -> bool {
+        self.query_enabled() && self.mode == HistoryMode::Content
+    }
+    pub fn set_mode(&mut self, mode: HistoryMode) {
+        self.mode = mode;
+        if mode == HistoryMode::Off {
+            self.rows.clear();
+            self.freshness.clear();
+        } else if mode == HistoryMode::Status {
+            for row in self.rows.values_mut() {
+                row.body = None;
+            }
+        }
+    }
+    pub fn set_limit(&mut self, limit: usize) -> bool {
+        if limit > 10_000 {
+            return false;
+        }
+        self.limit = limit;
+        self.trim();
+        true
+    }
     pub fn source(&self, id: DeviceId) -> Option<SourceFreshness> {
         self.freshness.get(&id).copied()
     }
@@ -90,6 +131,9 @@ impl MobileHistory {
     ) -> Result<(), HistoryError> {
         if !self.active || generation != self.generation {
             return Err(HistoryError::Background);
+        }
+        if !self.query_enabled() {
+            return Err(HistoryError::Disabled);
         }
         if page.items.len() > MAX_HISTORY_PAGE as usize
             || page.revision == 0
@@ -156,6 +200,9 @@ impl MobileHistory {
         if !self.active || generation != self.generation {
             return Err(HistoryError::Background);
         }
+        if !self.wants_body() {
+            return Err(HistoryError::Disabled);
+        }
         let row = self.rows.get_mut(&event).ok_or(HistoryError::Missing)?;
         if !row.summary.body_available
             || bytes.len() as u64 != row.summary.metadata.size
@@ -181,6 +228,9 @@ impl MobileHistory {
         if !self.active || generation != self.generation {
             return Err(HistoryError::Background);
         }
+        if self.mode == HistoryMode::Off || self.limit == 0 {
+            return Ok(());
+        }
         if event.seq == 0
             || body.is_empty()
             || body.len() > 8 * 1024 * 1024
@@ -201,7 +251,7 @@ impl MobileHistory {
                     copied_at_ms,
                     body_available: true,
                 },
-                body: Some(body),
+                body: (self.mode == HistoryMode::Content).then_some(body),
             },
         );
         self.trim();
@@ -400,6 +450,44 @@ mod tests {
                 )
                 .is_err()
         );
+    }
+
+    #[test]
+    fn history_modes_and_limit_bound_queries_and_cached_bodies() {
+        let mut history = MobileHistory::default();
+        let generation = history.enter_foreground();
+        let source = [3; 32];
+        let page = page(source, [4; 16], 1, b"fixture");
+        let event = page.items[0].event;
+        history
+            .merge_page(generation, source, page.clone(), 1)
+            .unwrap();
+        history
+            .cache_body(generation, event, b"fixture".to_vec())
+            .unwrap();
+        history.set_mode(HistoryMode::Status);
+        assert!(history.query_enabled());
+        assert!(!history.wants_body());
+        assert!(history.body_for_explicit_copy(event).is_none());
+        assert_eq!(
+            history.cache_body(generation, event, b"fixture".to_vec()),
+            Err(HistoryError::Disabled)
+        );
+        history.set_mode(HistoryMode::Off);
+        assert!(!history.query_enabled());
+        assert!(history.timeline().is_empty());
+        assert_eq!(
+            history.merge_page(generation, source, page.clone(), 2),
+            Err(HistoryError::Disabled)
+        );
+        history.set_mode(HistoryMode::Content);
+        assert!(!history.set_limit(10_001));
+        assert_eq!(history.limit(), 20);
+        assert!(history.set_limit(0));
+        assert!(!history.query_enabled());
+        assert!(history.set_limit(1));
+        history.merge_page(generation, source, page, 3).unwrap();
+        assert_eq!(history.timeline().len(), 1);
     }
 
     #[test]

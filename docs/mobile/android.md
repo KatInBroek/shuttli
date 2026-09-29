@@ -1,6 +1,6 @@
 # Android foreground app specification
 
-Status: proposed; not implemented or device-validated. The [mobile feature specification](feature-spec.md) owns product requirements. [Issue #52](https://github.com/KatInBroek/shuttli/issues/52). Prerequisite: [shared SDK](shared-sdk.md); [iOS specification](ios.md) is independent.
+Status: Android app and shared SDK implemented; emulator tests and unsigned packages pass, but real-device Tailscale and cross-app acceptance remains pending. The [mobile feature specification](feature-spec.md) owns product requirements. [Issue #52](https://github.com/KatInBroek/shuttli/issues/52). Prerequisite: [shared SDK](shared-sdk.md); [iOS specification](ios.md) is independent.
 
 ## Scope and platform
 

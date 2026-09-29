@@ -69,6 +69,13 @@ private struct HomeView: View {
                         }
                     }
                 }
+                if !state.transferRows.isEmpty {
+                    Section("sent_from_phone") {
+                        ForEach(state.transferRows.prefix(3), id: \.uniqueID) { transfer in
+                            TransferRowView(row: transfer)
+                        }
+                    }
+                }
             }
             .navigationTitle(Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "")
         }
@@ -77,18 +84,26 @@ private struct HomeView: View {
 
 private struct HistoryView: View {
     @EnvironmentObject private var state: AppState
+    @State private var filter = 0
+
+    private var filtered: [MobileHistoryRow] {
+        state.historyRows.filter { filter == 0 || (filter == 2) == $0.isLocal }
+    }
 
     var body: some View {
         NavigationStack {
-            Group {
-                if state.historyRows.isEmpty {
-                    EmptyState(symbol: "clock", title: "history_empty", detail: "history_help")
-                } else {
-                    List {
-                        ForEach(state.historyRows, id: \.eventKey) { row in
-                            HistoryRowLink(row: row)
-                        }
-                    }
+            List {
+                Picker("history_filter", selection: $filter) {
+                    Text("all").tag(0)
+                    Text("from_devices").tag(1)
+                    Text("sent_from_phone").tag(2)
+                }
+                .pickerStyle(.menu)
+                if filtered.isEmpty {
+                    Text("history_empty").foregroundStyle(.secondary)
+                }
+                ForEach(filtered, id: \.eventKey) { row in
+                    HistoryRowLink(row: row)
                 }
             }
             .navigationTitle("history")
@@ -116,6 +131,10 @@ private struct TransferRowView: View {
         case .unknown: "transfer_unknown"
         }
     }
+}
+
+private extension MobileTransferRow {
+    var uniqueID: String { eventKey + targetId }
 }
 
 private struct HistoryRowLink: View {
@@ -226,6 +245,9 @@ private struct DevicesView: View {
                                 set: { state.setSend($0, for: device) }
                             ))
                             Text("manual_send_only").foregroundStyle(.secondary)
+                            if let status = state.settingsStatusKey {
+                                Text(LocalizedStringKey(status)).foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -253,6 +275,7 @@ private struct EmptyState: View {
 private struct SettingsView: View {
     @EnvironmentObject private var state: AppState
     @State private var confirmClear = false
+    @State private var limitDraft = "20"
 
     var body: some View {
         NavigationStack {
@@ -261,10 +284,30 @@ private struct SettingsView: View {
                     Text("manual_clipboard_help")
                 }
                 Section("history") {
+                    Picker("history_mode", selection: Binding(
+                        get: { state.historyModeKey },
+                        set: { state.setHistoryMode($0) }
+                    )) {
+                        Text("history_off").tag("off")
+                        Text("history_status").tag("status")
+                        Text("history_content").tag("content")
+                    }
+                    TextField("history_limit", text: $limitDraft)
+                        .keyboardType(.numberPad)
+                    Button("apply_history_limit") {
+                        if let limit = Int(limitDraft), (0...10_000).contains(limit) {
+                            state.setHistoryLimit(limit)
+                        }
+                    }
+                    Text("history_limit_help").foregroundStyle(.secondary)
+                    if let status = state.settingsStatusKey {
+                        Text(LocalizedStringKey(status)).foregroundStyle(.secondary)
+                    }
                     Button("clear_history", role: .destructive) { confirmClear = true }
                 }
             }
             .navigationTitle("settings")
+            .onAppear { limitDraft = String(state.historyLimit) }
             .alert("clear_history", isPresented: $confirmClear) {
                 Button("clear", role: .destructive) { state.clearHistory() }
                 Button("cancel", role: .cancel) {}

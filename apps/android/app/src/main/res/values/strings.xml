@@ -1,0 +1,26 @@
+<resources>
+
+<string name="home">Home</string><string name="history">History</string><string name="devices">Devices</string><string name="settings">Settings</string>
+<string name="connect_help">Open the app while Tailscale is connected. A permitted computer will find this phone.</string>
+<string name="waiting_for_devices">Waiting for devices</string><string name="devices_connected">Connected to %1$d devices</string>
+<string name="tailscale_unavailable">Connect Tailscale to receive from your computers</string>
+<string name="identity_unavailable">Could not access this device identity</string><string name="listener_unavailable">Could not start device connection</string>
+<string name="send_from_phone">Send from this phone</string><string name="manual_clipboard_help">Clipboard import and sending require separate taps. Received history never changes this phone clipboard until you choose Copy.</string>
+<string name="paste_clipboard">Paste from clipboard</string><string name="image_draft">Image ready (%1$d bytes)</string>
+<string name="send_to_devices">Send to devices</string><string name="recent_history">Recent history</string><string name="history_empty">No recent copies</string>
+<string name="all">All</string><string name="from_devices">From devices</string><string name="sent_from_phone">Sent from phone</string>
+<string name="text_item">Text</string><string name="image_item">Image</string><string name="this_phone">This phone</string>
+<string name="item_available">Available in app</string><string name="item_listed">Listed; content unavailable</string>
+<string name="back">Back</string><string name="bytes">%1$d bytes</string><string name="content_unavailable">Content no longer available</string><string name="preview_unavailable">Preview unavailable</string>
+<string name="copy_to_phone">Copy to this phone</string><string name="send_again">Send again</string>
+<string name="no_connected_devices">No connected devices</string><string name="device_online">Online</string><string name="device_offline">Offline</string>
+<string name="receive_from_device">Receive from this device</string><string name="send_to_device">Allow sending to this device</string>
+<string name="device_consent_help">A device allowed to send to this phone may provide its retained history, including older copies. Phone sending requires a separate tap.</string>
+<string name="privacy">Privacy</string><string name="clear_history">Clear local history</string><string name="clear_history_help">This clears the phone cache. Permitted computers may provide retained copies again. An image already on the system clipboard remains usable for a short time.</string>
+<string name="clear">Clear</string><string name="cancel">Cancel</string><string name="history_count">%1$d items in history</string>
+<string name="send_queued">Sending to permitted devices</string><string name="no_send_targets">Allow sending to at least one connected device first</string>
+<string name="unsupported_image">Image is too large or unsupported</string><string name="unsupported_text">Text is too large or unsupported</string><string name="unsupported_clipboard">Clipboard content is unsupported</string>
+<string name="copied_to_phone">Copied to this phone</string><string name="copy_uncertain">Could not verify the copy</string><string name="policy_failed">Could not save device permission</string>
+<string name="transfer_queued">Queued</string><string name="transfer_sending">Sending</string><string name="transfer_applied">Applied on device</string><string name="transfer_failed">Failed</string><string name="transfer_unknown">Outcome unknown</string>
+<string name="history_mode">History mode</string><string name="history_off">Off</string><string name="history_status">Status only</string><string name="history_content">Content</string><string name="history_limit">Maximum items</string><string name="apply_history_limit">Apply limit</string><string name="history_limit_help">0–10,000 items. Zero stops history queries; image and memory quotas still apply.</string><string name="settings_failed">Could not save history settings</string>
+</resources>

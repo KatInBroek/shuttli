@@ -34,6 +34,9 @@ enum DevicePolicyStore {
             values.isExcludedFromBackup = true
             try url.setResourceValues(values)
             return true
-        } catch { return false }
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            return false
+        }
     }
 }

@@ -51,3 +51,14 @@
 "paste_text" = "Coller du texte";
 "paste_image" = "Coller une image";
 "image_too_large" = "Image trop volumineuse ou non prise en charge";
+"all" = "Tout";
+"from_devices" = "Des appareils";
+"history_filter" = "Afficher";
+"history_mode" = "Mode historique";
+"history_off" = "Désactivé";
+"history_status" = "Statut seul";
+"history_content" = "Contenu";
+"history_limit" = "Nombre maximal";
+"apply_history_limit" = "Appliquer la limite";
+"history_limit_help" = "0 à 10 000 éléments. Zéro arrête les requêtes; les limites de mémoire et d’image restent actives.";
+"settings_unavailable" = "Impossible d’enregistrer les réglages de l’historique";

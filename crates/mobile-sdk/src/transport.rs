@@ -404,8 +404,7 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                 }
             }
             _ = refresh.tick() => {
-                if !pending_list && pending_body.is_none() && peers.lock().map_err(|_| "peer directory unavailable")?
-                    .direct().iter().any(|p| p.id == source && p.directions.receive) {
+                if !pending_list && pending_body.is_none() && can_query(context, source) {
                     body_budget = crate::MAX_SESSION_BYTES;
                     write_frame(stream, &FrameV2::HistoryListRequest { cursor: None, limit: 20 }).await?;
                     pending_list = true;
@@ -421,13 +420,23 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                     FrameV2::HistoryListResponse { source_epoch: page_epoch, revision, items, next } if pending_list => {
                         if page_epoch != source_epoch { return Err("history source epoch mismatch".into()); }
                         pending_list = false;
+                        if !can_query(context, source) {
+                            body_queue.clear();
+                            next_cursor = None;
+                            continue;
+                        }
                         next_cursor = next;
                         let page = shuttli_model::mobile::HistoryListResponse { source_epoch: page_epoch, revision, items, next };
-                        let candidates: Vec<_> = page.items.iter().filter(|i| i.body_available)
+                        let wants_body = history.lock().map_err(|_| "history unavailable")?.wants_body();
+                        let candidates: Vec<_> = page.items.iter().filter(|i| i.body_available && wants_body)
                             .map(|i| (i.event, i.metadata.size)).collect();
                         {
                             let mut cache = history.lock().map_err(|_| "history unavailable")?;
-                            cache.merge_page(generation, source, page, now_ms()).map_err(|e| format!("{e:?}"))?;
+                            match cache.merge_page(generation, source, page, now_ms()) {
+                                Ok(()) => {},
+                                Err(crate::HistoryError::Disabled) => { body_queue.clear(); next_cursor = None; continue; }
+                                Err(error) => return Err(format!("{error:?}")),
+                            }
                             for (event, size) in candidates {
                                 if cache.body_for_explicit_copy(event).is_none() && size <= body_budget as u64 {
                                     body_budget -= size as usize;
@@ -435,6 +444,7 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                                 }
                             }
                         }
+                        if !can_query(context, source) { body_queue.clear(); next_cursor = None; }
                         if let Some(event) = body_queue.pop_front() {
                             write_frame(stream, &FrameV2::HistoryGet { event }).await?;
                             pending_body = Some(event);
@@ -445,17 +455,23 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                     }
                     FrameV2::HistoryBody { event, metadata } if pending_body == Some(event) => {
                         if metadata.size > 8 * 1024 * 1024 { return Err("oversized history body".into()); }
-                        if history.lock().map_err(|_| "history unavailable")?.timeline()
-                            .iter().find(|row| row.summary.event == event)
-                            .is_none_or(|row| row.summary.metadata != metadata) {
-                            return Err("history body metadata mismatch".into());
-                        }
                         let mut bytes = vec![0; metadata.size as usize];
                         timeout(Duration::from_secs(20), stream.read_exact(&mut bytes))
                             .await.map_err(|_| "history body timeout")?.map_err(|e| e.to_string())?;
-                        history.lock().map_err(|_| "history unavailable")?
-                            .cache_body(generation, event, bytes).map_err(|e| format!("{e:?}"))?;
+                        if can_query(context, source) && history.lock().map_err(|_| "history unavailable")?.wants_body() {
+                            if history.lock().map_err(|_| "history unavailable")?.timeline()
+                                .iter().find(|row| row.summary.event == event)
+                                .is_none_or(|row| row.summary.metadata != metadata) {
+                                return Err("history body metadata mismatch".into());
+                            }
+                            history.lock().map_err(|_| "history unavailable")?
+                                .cache_body(generation, event, bytes).map_err(|e| format!("{e:?}"))?;
+                        } else {
+                            body_queue.clear();
+                            next_cursor = None;
+                        }
                         pending_body = None;
+                        if !can_query(context, source) { body_queue.clear(); next_cursor = None; }
                         if let Some(event) = body_queue.pop_front() {
                             write_frame(stream, &FrameV2::HistoryGet { event }).await?;
                             pending_body = Some(event);
@@ -465,7 +481,7 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                         }
                     }
                     FrameV2::HistoryChanged { .. } => {
-                        if !pending_list && pending_body.is_none() {
+                        if !pending_list && pending_body.is_none() && can_query(context, source) {
                             write_frame(stream, &FrameV2::HistoryListRequest { cursor: None, limit: 20 }).await?;
                             pending_list = true;
                         }
@@ -481,6 +497,21 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
             }
         }
     }
+}
+
+fn can_query(context: &SessionContext, source: DeviceId) -> bool {
+    let permitted = context.peers.lock().ok().is_some_and(|directory| {
+        directory
+            .direct()
+            .iter()
+            .any(|peer| peer.id == source && peer.online && peer.directions.receive)
+    });
+    permitted
+        && context
+            .history
+            .lock()
+            .ok()
+            .is_some_and(|history| history.query_enabled())
 }
 
 fn permitted_to_send(context: &SessionContext, target: DeviceId) -> bool {
@@ -626,6 +657,7 @@ async fn read_frame(stream: &mut (impl AsyncRead + Unpin)) -> Result<FrameV2> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::HistoryMode;
     use shuttli_model::{
         mobile::HistorySummary,
         sync::{Format, Metadata},
@@ -637,6 +669,60 @@ mod tests {
         assert!(tailscale_ipv4("100.127.255.254".parse().unwrap()));
         assert!(!tailscale_ipv4("100.128.0.1".parse().unwrap()));
         assert!(!tailscale_ipv4("192.168.1.2".parse().unwrap()));
+    }
+
+    #[test]
+    fn changed_hint_cannot_query_after_receive_or_history_is_disabled() {
+        let (identity, _) = Identity::generate().unwrap();
+        let source = [2; 32];
+        let history = Arc::new(Mutex::new(MobileHistory::default()));
+        history.lock().unwrap().enter_foreground();
+        let peers = Arc::new(Mutex::new(PeerDirectory::new(identity.id)));
+        peers
+            .lock()
+            .unwrap()
+            .observed_direct(
+                source,
+                "Desktop".into(),
+                "100.100.100.2:45987".into(),
+                Capabilities::desktop(),
+            )
+            .unwrap();
+        let (_, stop) = watch::channel(false);
+        let context = SessionContext {
+            identity: Arc::new(identity),
+            name: "Phone".into(),
+            epoch: [4; 16],
+            history: history.clone(),
+            peers: peers.clone(),
+            results: Arc::new(Mutex::new(BTreeMap::new())),
+            routes: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
+            stop,
+        };
+        assert!(can_query(&context, source));
+        peers
+            .lock()
+            .unwrap()
+            .directions(
+                source,
+                crate::peers::Directions {
+                    send: false,
+                    receive: false,
+                },
+            )
+            .unwrap();
+        assert!(!can_query(&context, source));
+        peers
+            .lock()
+            .unwrap()
+            .directions(source, crate::peers::Directions::default())
+            .unwrap();
+        history.lock().unwrap().set_mode(HistoryMode::Off);
+        assert!(!can_query(&context, source));
+        history.lock().unwrap().set_mode(HistoryMode::Status);
+        assert!(can_query(&context, source));
+        history.lock().unwrap().set_limit(0);
+        assert!(!can_query(&context, source));
     }
 
     #[tokio::test(flavor = "current_thread")]
