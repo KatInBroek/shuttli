@@ -1139,6 +1139,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "shuttli-protocol"
+version = "0.1.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "shuttli-model",
+]
+
+[[package]]
 name = "shuttli-runtime"
 version = "0.1.1"
 dependencies = [

@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::sync::{DeviceId, EventId, Metadata};
 
-pub const MAX_PEER_HINTS: usize = 64;
-pub const MAX_HISTORY_PAGE: u16 = 64;
+pub const MAX_PEER_HINTS: usize = 32;
+pub const MAX_HISTORY_PAGE: u16 = 20;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -103,7 +103,7 @@ mod tests {
 
     #[test]
     fn history_page_size_is_bounded() {
-        for (limit, valid) in [(0, false), (1, true), (64, true), (65, false)] {
+        for (limit, valid) in [(0, false), (1, true), (20, true), (21, false)] {
             assert_eq!(
                 HistoryListRequest {
                     cursor: None,

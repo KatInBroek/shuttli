@@ -13,7 +13,8 @@
     "shuttli-native-ui": "ui",
     "shuttli-brand": "brand",
     "shuttli-mobile-sdk": "mobile-sdk",
-    "shuttli-mobile-ffi": "mobile-ffi"
+    "shuttli-mobile-ffi": "mobile-ffi",
+    "shuttli-protocol": "protocol"
   },
   "reachable_layers": {
     "value": [],
@@ -79,6 +80,9 @@
     ],
     "mobile-ffi": [
       "mobile-sdk",
+      "value"
+    ],
+    "protocol": [
       "value"
     ]
   },
@@ -639,6 +643,19 @@
       "windows-link",
       "windows-sys",
       "winnow",
+      "zmij"
+    ],
+    "protocol": [
+      "itoa",
+      "memchr",
+      "proc-macro2",
+      "quote",
+      "serde",
+      "serde_core",
+      "serde_derive",
+      "serde_json",
+      "syn",
+      "unicode-ident",
       "zmij"
     ]
   }
