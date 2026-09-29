@@ -347,12 +347,57 @@ mod tests {
     fn restored_consent_requires_exact_direct_identity() {
         let mut directory = PeerDirectory::new([1; 32]);
         let id = [2; 32];
-        assert!(directory.restore_directions(id, Directions { send: true, receive: false }));
+        assert!(directory.restore_directions(
+            id,
+            Directions {
+                send: true,
+                receive: false
+            }
+        ));
         assert!(directory.direct().is_empty());
-        assert!(!directory.restore_directions([1; 32], Directions { send: true, receive: true }));
-        directory.observed_direct(id, "known".into(), "100.64.0.2:45987".into(), Capabilities::desktop()).unwrap();
-        directory.observed_direct([3; 32], "new".into(), "100.64.0.3:45987".into(), Capabilities::desktop()).unwrap();
-        assert_eq!(directory.direct().iter().find(|peer| peer.id == id).unwrap().directions, Directions { send: true, receive: false });
-        assert_eq!(directory.direct().iter().find(|peer| peer.id == [3; 32]).unwrap().directions, Directions::default());
+        assert!(!directory.restore_directions(
+            [1; 32],
+            Directions {
+                send: true,
+                receive: true
+            }
+        ));
+        directory
+            .observed_direct(
+                id,
+                "known".into(),
+                "100.64.0.2:45987".into(),
+                Capabilities::desktop(),
+            )
+            .unwrap();
+        directory
+            .observed_direct(
+                [3; 32],
+                "new".into(),
+                "100.64.0.3:45987".into(),
+                Capabilities::desktop(),
+            )
+            .unwrap();
+        assert_eq!(
+            directory
+                .direct()
+                .iter()
+                .find(|peer| peer.id == id)
+                .unwrap()
+                .directions,
+            Directions {
+                send: true,
+                receive: false
+            }
+        );
+        assert_eq!(
+            directory
+                .direct()
+                .iter()
+                .find(|peer| peer.id == [3; 32])
+                .unwrap()
+                .directions,
+            Directions::default()
+        );
     }
 }
