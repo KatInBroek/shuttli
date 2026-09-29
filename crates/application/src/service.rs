@@ -242,6 +242,16 @@ impl Service {
     }
     async fn network_event(&self, event: NetworkEvent) -> Result<()> {
         match event {
+            NetworkEvent::PeerHintsPermission { peer, reply } => {
+                let result = self
+                    .state
+                    .borrow()
+                    .core
+                    .authorize_peer_hints(peer)
+                    .map(|_| self.state.borrow().core.revision())
+                    .map_err(|e| format!("{e:?}"));
+                let _ = reply.send(result);
+            }
             NetworkEvent::HistoryListQuery {
                 peer,
                 cursor,

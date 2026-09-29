@@ -1026,6 +1026,7 @@ dependencies = [
  "shuttli-identity",
  "shuttli-model",
  "shuttli-ports",
+ "shuttli-protocol",
  "tokio",
  "tokio-rustls",
  "x11rb",

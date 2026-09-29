@@ -41,6 +41,7 @@
       "core",
       "identity",
       "ports",
+      "protocol",
       "value"
     ],
     "runtime": [
@@ -62,6 +63,7 @@
       "core",
       "identity",
       "ports",
+      "protocol",
       "runtime",
       "ui",
       "value"
@@ -74,6 +76,7 @@
       "core",
       "identity",
       "ports",
+      "protocol",
       "runtime",
       "ui",
       "value"

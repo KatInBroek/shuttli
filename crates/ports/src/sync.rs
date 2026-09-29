@@ -63,6 +63,10 @@ pub trait Store: Send {
     fn prune(&mut self) -> Result<()>;
 }
 pub enum NetworkEvent {
+    PeerHintsPermission {
+        peer: DeviceId,
+        reply: SyncSender<Result<u64>>,
+    },
     HistoryListQuery {
         peer: DeviceId,
         cursor: Option<HistoryCursor>,

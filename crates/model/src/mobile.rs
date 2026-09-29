@@ -33,6 +33,14 @@ impl Capabilities {
             ..Self::pull_only()
         }
     }
+    pub const fn legacy_desktop() -> Self {
+        Self {
+            peer_hints: false,
+            history_pull: false,
+            history_change: false,
+            accept_live_offer: true,
+        }
+    }
 }
 
 /// A route suggestion, never a trust or permission grant. The receiver adds

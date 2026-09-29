@@ -6,8 +6,10 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use shuttli_core::sync::Publication;
+use shuttli_model::mobile::{Capabilities, PeerHint, PeerList};
 use shuttli_model::sync::*;
 use shuttli_ports::sync::{Network, NetworkEvent, Payload, Result};
+use shuttli_protocol::{FrameV2, Hello, decode_hello, encode_hello};
 use std::{
     collections::{HashMap, VecDeque},
     net::{IpAddr, SocketAddr},
@@ -30,11 +32,6 @@ const DEADLINE: Duration = Duration::from_secs(20);
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum Frame {
-    Hello {
-        version: u16,
-        name: String,
-        epoch: [u8; 16],
-    },
     Offer {
         event: EventId,
         meta: Metadata,
@@ -56,6 +53,40 @@ enum Frame {
     },
     Poll,
     Idle,
+}
+async fn write_hello(s: &mut (impl AsyncWrite + Unpin), hello: &Hello) -> Result<()> {
+    let bytes = encode_hello(hello).map_err(str::to_owned)?;
+    s.write_u32(bytes.len() as u32)
+        .await
+        .map_err(|e| e.to_string())?;
+    s.write_all(&bytes).await.map_err(|e| e.to_string())?;
+    s.flush().await.map_err(|e| e.to_string())
+}
+async fn read_hello(s: &mut (impl AsyncRead + Unpin)) -> Result<Hello> {
+    let len = s.read_u32().await.map_err(|e| e.to_string())? as usize;
+    if len == 0 || len > shuttli_protocol::MAX_CONTROL_FRAME_BYTES {
+        return Err("invalid hello size".into());
+    }
+    let mut bytes = vec![0; len];
+    s.read_exact(&mut bytes).await.map_err(|e| e.to_string())?;
+    decode_hello(&bytes).map_err(str::to_owned)
+}
+async fn write_v2_frame(s: &mut (impl AsyncWrite + Unpin), frame: &FrameV2) -> Result<()> {
+    let bytes = frame.encode().map_err(str::to_owned)?;
+    s.write_u32(bytes.len() as u32)
+        .await
+        .map_err(|e| e.to_string())?;
+    s.write_all(&bytes).await.map_err(|e| e.to_string())?;
+    s.flush().await.map_err(|e| e.to_string())
+}
+async fn read_v2_frame(s: &mut (impl AsyncRead + Unpin)) -> Result<FrameV2> {
+    let len = s.read_u32().await.map_err(|e| e.to_string())? as usize;
+    if len == 0 || len > shuttli_protocol::MAX_CONTROL_FRAME_BYTES {
+        return Err("invalid v2 frame size".into());
+    }
+    let mut bytes = vec![0; len];
+    s.read_exact(&mut bytes).await.map_err(|e| e.to_string())?;
+    FrameV2::decode(&bytes).map_err(str::to_owned)
 }
 async fn write_frame(s: &mut (impl AsyncWrite + Unpin), v: &Frame) -> Result<()> {
     let b = serde_json::to_vec(v).map_err(|e| e.to_string())?;
@@ -85,16 +116,6 @@ fn peer(id: DeviceId, name: String, address: SocketAddr) -> PeerInfo {
         online: true,
     }
 }
-fn hello_name(f: Frame) -> Result<(String, [u8; 16])> {
-    match f {
-        Frame::Hello {
-            version: 1,
-            name,
-            epoch,
-        } if name.len() <= 256 => Ok((name, epoch)),
-        _ => Err("incompatible HELLO".into()),
-    }
-}
 struct Outbound {
     permit: Publication,
     payload: Payload,
@@ -105,6 +126,7 @@ struct Session {
     initiator: DeviceId,
     live: Arc<std::sync::atomic::AtomicBool>,
     peer: PeerInfo,
+    capabilities: Capabilities,
 }
 #[derive(Clone)]
 struct Query {
@@ -310,6 +332,7 @@ async fn selected(
     initiator: DeviceId,
     id: DeviceId,
     epoch: [u8; 16],
+    capabilities: Capabilities,
 ) -> Result<Arc<std::sync::atomic::AtomicBool>> {
     let live = Arc::new(std::sync::atomic::AtomicBool::new(true));
     {
@@ -331,6 +354,7 @@ async fn selected(
                 initiator,
                 live: live.clone(),
                 peer: info.clone(),
+                capabilities,
             },
         );
     }
@@ -378,17 +402,25 @@ async fn connect(s: Arc<Shared>, address: SocketAddr) -> Result<()> {
             .ok_or("missing server identity")?
             .as_ref(),
     )?;
-    let (name, remote_epoch) = timeout(Duration::from_secs(5), async {
-        write_frame(
+    let (name, remote_epoch, capabilities, v2) = timeout(Duration::from_secs(5), async {
+        write_hello(
             &mut tls,
-            &Frame::Hello {
-                version: 1,
+            &Hello::V1 {
                 name: s.name.clone(),
                 epoch: s.epoch,
             },
         )
         .await?;
-        hello_name(read_frame(&mut tls).await?)
+        match read_hello(&mut tls).await? {
+            Hello::V1 { name, epoch } => {
+                Ok::<_, String>((name, epoch, Capabilities::legacy_desktop(), false))
+            }
+            Hello::V2 {
+                name,
+                epoch,
+                capabilities,
+            } => Ok((name, epoch, capabilities, true)),
+        }
     })
     .await
     .map_err(|_| "HELLO timed out")??;
@@ -399,8 +431,14 @@ async fn connect(s: Arc<Shared>, address: SocketAddr) -> Result<()> {
         s.identity.id,
         id,
         remote_epoch,
+        capabilities,
     )
     .await?;
+    if v2 {
+        let result = serve_v2_session(&s, &mut tls, id, &live).await;
+        disconnected(&s, id, &live).await;
+        return result;
+    }
     let result = async {
         while live.load(Ordering::SeqCst) {
             if let Some(query) = take_query(&s, id).await {
@@ -488,18 +526,36 @@ async fn incoming_connection(s: Arc<Shared>, stream: TcpStream, address: SocketA
             .ok_or("missing client identity")?
             .as_ref(),
     )?;
-    let (name, remote_epoch) = timeout(Duration::from_secs(5), async {
-        let name = hello_name(read_frame(&mut tls).await?)?;
-        write_frame(
-            &mut tls,
-            &Frame::Hello {
-                version: 1,
-                name: s.name.clone(),
-                epoch: s.epoch,
-            },
-        )
-        .await?;
-        Ok::<_, String>(name)
+    let (name, remote_epoch, capabilities, v2) = timeout(Duration::from_secs(5), async {
+        let remote = read_hello(&mut tls).await?;
+        let (name, epoch, capabilities, reply) = match remote {
+            Hello::V1 { name, epoch } => (
+                name,
+                epoch,
+                Capabilities::legacy_desktop(),
+                Hello::V1 {
+                    name: s.name.clone(),
+                    epoch: s.epoch,
+                },
+            ),
+            Hello::V2 {
+                name,
+                epoch,
+                capabilities,
+            } => (
+                name,
+                epoch,
+                capabilities,
+                Hello::V2 {
+                    name: s.name.clone(),
+                    epoch: s.epoch,
+                    capabilities: shuttli_model::mobile::Capabilities::desktop(),
+                },
+            ),
+        };
+        let v2 = matches!(reply, Hello::V2 { .. });
+        write_hello(&mut tls, &reply).await?;
+        Ok::<_, String>((name, epoch, capabilities, v2))
     })
     .await
     .map_err(|_| "HELLO timeout")??;
@@ -510,8 +566,14 @@ async fn incoming_connection(s: Arc<Shared>, stream: TcpStream, address: SocketA
         id,
         id,
         remote_epoch,
+        capabilities,
     )
     .await?;
+    if v2 {
+        let result = serve_v2_session(&s, &mut tls, id, &live).await;
+        disconnected(&s, id, &live).await;
+        return result;
+    }
     let result = async {
         while live.load(Ordering::SeqCst) {
             match timeout(DEADLINE, read_frame(&mut tls))
@@ -573,6 +635,152 @@ async fn disconnected(s: &Shared, id: DeviceId, live: &Arc<std::sync::atomic::At
             let _ = s.events.send(NetworkEvent::Peer(v.peer)).await;
         }
     }
+}
+async fn application_reply<T: Send + 'static>(rx: mpsc::Receiver<Result<T>>) -> Result<T> {
+    tokio::task::spawn_blocking(move || rx.recv_timeout(Duration::from_secs(5)))
+        .await
+        .map_err(|_| "application reply worker stopped")?
+        .map_err(|_| "application reply timed out")?
+}
+async fn can_send_hints(s: &Shared, peer: DeviceId) -> Result<u64> {
+    let (reply, rx) = mpsc::sync_channel(1);
+    s.events
+        .try_send(NetworkEvent::PeerHintsPermission { peer, reply })
+        .map_err(|_| "application busy")?;
+    application_reply(rx).await
+}
+async fn direct_roster(s: &Shared, receiver: DeviceId) -> Vec<PeerHint> {
+    s.sessions
+        .lock()
+        .await
+        .iter()
+        .filter(|(id, session)| **id != receiver && session.live.load(Ordering::SeqCst))
+        .take(shuttli_model::mobile::MAX_PEER_HINTS)
+        .map(|(id, session)| PeerHint {
+            id: *id,
+            endpoint: session.peer.address.clone(),
+            capabilities: session.capabilities,
+        })
+        .collect()
+}
+async fn serve_v2_session(
+    s: &Shared,
+    tls: &mut impl Duplex,
+    id: DeviceId,
+    live: &Arc<AtomicBool>,
+) -> Result<()> {
+    let capabilities = s
+        .sessions
+        .lock()
+        .await
+        .get(&id)
+        .ok_or("missing v2 session")?
+        .capabilities;
+    let mut last_roster: Option<Vec<PeerHint>> = None;
+    let mut roster_revision = 0u64;
+    let mut next_roster_check = Instant::now();
+    while live.load(Ordering::SeqCst) {
+        if !capabilities.accept_live_offer {
+            if let Some(out) = s.pending.lock().await.remove(&id) {
+                report(
+                    s,
+                    &out,
+                    DeliveryState::Cancelled,
+                    "peer does not accept live offers".into(),
+                )
+                .await;
+            }
+        }
+        if capabilities.peer_hints && Instant::now() >= next_roster_check {
+            next_roster_check = Instant::now() + Duration::from_secs(5);
+            match can_send_hints(s, id).await {
+                Ok(revision) if revision == s.revision.load(Ordering::SeqCst) => {
+                    let roster = direct_roster(s, id).await;
+                    if last_roster.as_ref() != Some(&roster) {
+                        roster_revision = roster_revision.saturating_add(1);
+                        write_v2_frame(
+                            tls,
+                            &FrameV2::from(PeerList {
+                                revision: roster_revision,
+                                peers: roster.clone(),
+                            }),
+                        )
+                        .await?;
+                        last_roster = Some(roster);
+                    }
+                }
+                _ => last_roster = None,
+            }
+        }
+        let frame = match timeout(Duration::from_secs(5), read_v2_frame(tls)).await {
+            Ok(result) => result?,
+            Err(_) => continue,
+        };
+        match frame {
+            FrameV2::HistoryListRequest { cursor, limit } if capabilities.history_pull => {
+                let (reply, rx) = mpsc::sync_channel(1);
+                s.events
+                    .try_send(NetworkEvent::HistoryListQuery {
+                        peer: id,
+                        cursor,
+                        limit,
+                        reply,
+                    })
+                    .map_err(|_| "application busy")?;
+                match application_reply(rx).await {
+                    Ok((revision, page)) if revision == s.revision.load(Ordering::SeqCst) => {
+                        write_v2_frame(tls, &page.into()).await?;
+                    }
+                    _ => {
+                        write_v2_frame(
+                            tls,
+                            &FrameV2::Error {
+                                code: "history_unavailable".into(),
+                            },
+                        )
+                        .await?
+                    }
+                }
+            }
+            FrameV2::HistoryGet { event } if capabilities.history_pull => {
+                let (reply, rx) = mpsc::sync_channel(1);
+                s.events
+                    .try_send(NetworkEvent::HistoryGetQuery {
+                        peer: id,
+                        event,
+                        reply,
+                    })
+                    .map_err(|_| "application busy")?;
+                match application_reply(rx).await {
+                    Ok((revision, payload)) if revision == s.revision.load(Ordering::SeqCst) => {
+                        write_v2_frame(
+                            tls,
+                            &FrameV2::HistoryBody {
+                                event,
+                                metadata: payload.meta.clone(),
+                            },
+                        )
+                        .await?;
+                        tls.write_all(&payload.data)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        tls.flush().await.map_err(|e| e.to_string())?;
+                    }
+                    _ => {
+                        write_v2_frame(
+                            tls,
+                            &FrameV2::Error {
+                                code: "history_unavailable".into(),
+                            },
+                        )
+                        .await?
+                    }
+                }
+            }
+            _ => return Err("unsupported v2 operation".into()),
+        }
+    }
+    Ok(())
 }
 async fn report(s: &Shared, out: &Outbound, state: DeliveryState, detail: String) {
     // Await capacity: terminal results are never dropped while the service lives.
@@ -950,22 +1158,159 @@ mod tests {
         a.write_u32(16385).await.unwrap();
         assert!(read_frame(&mut b).await.is_err());
     }
+    #[tokio::test(flavor = "current_thread")]
+    async fn framed_hello_keeps_v1_and_v2_separate() {
+        let (mut writer, mut reader) = tokio::io::duplex(1024);
+        write_hello(
+            &mut writer,
+            &Hello::V1 {
+                name: "old".into(),
+                epoch: [1; 16],
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            read_hello(&mut reader).await.unwrap(),
+            Hello::V1 {
+                name: "old".into(),
+                epoch: [1; 16]
+            }
+        );
+        write_hello(
+            &mut writer,
+            &Hello::V2 {
+                name: "phone".into(),
+                epoch: [2; 16],
+                capabilities: Capabilities::pull_only(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            read_hello(&mut reader).await.unwrap(),
+            Hello::V2 {
+                name: "phone".into(),
+                epoch: [2; 16],
+                capabilities: Capabilities::pull_only(),
+            }
+        );
+    }
     #[test]
     fn unknown_fields_and_versions_are_rejected() {
         assert!(
-            serde_json::from_str::<Frame>(
-                r#"{"type":"hello","version":1,"name":"n","required":"unknown"}"#
-            )
-            .is_err()
+            decode_hello(br#"{"type":"hello","version":1,"name":"n","required":"unknown"}"#)
+                .is_err()
         );
+        assert!(decode_hello(br#"{"type":"hello","version":3}"#).is_err());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn v2_pull_session_sends_roster_page_and_exact_body() {
+        let (identity, _) = Identity::generate().unwrap();
+        let desktop = identity.id;
+        let phone = [9; 32];
+        let (events, mut event_rx) = tokio::sync::mpsc::channel(8);
+        let shared = Arc::new(Shared {
+            epoch: [1; 16],
+            identity: Arc::new(identity),
+            name: "Desktop".into(),
+            events,
+            revision: Arc::new(AtomicU64::new(1)),
+            sessions: Mutex::new(HashMap::new()),
+            pending: Mutex::new(HashMap::new()),
+            queries: Mutex::new(VecDeque::new()),
+            budget: Mutex::new((Instant::now(), 0)),
+            receive_slots: Semaphore::new(2),
+        });
+        let live = Arc::new(AtomicBool::new(true));
+        shared.sessions.lock().await.insert(
+            phone,
+            Session {
+                epoch: [2; 16],
+                initiator: phone,
+                live: live.clone(),
+                peer: peer(
+                    phone,
+                    "Phone".into(),
+                    "100.100.100.9:45987".parse().unwrap(),
+                ),
+                capabilities: Capabilities::pull_only(),
+            },
+        );
+        let body = payload(Format::Text, b"fixture".to_vec()).unwrap();
+        let event = EventId {
+            origin: desktop,
+            epoch: [1; 16],
+            seq: 1,
+        };
+        let response = shuttli_model::mobile::HistoryListResponse {
+            source_epoch: [1; 16],
+            revision: 1,
+            items: vec![shuttli_model::mobile::HistorySummary {
+                event,
+                metadata: body.meta.clone(),
+                copied_at_ms: 1,
+                body_available: true,
+            }],
+            next: None,
+        };
+        let worker = tokio::spawn(async move {
+            while let Some(request) = event_rx.recv().await {
+                match request {
+                    NetworkEvent::PeerHintsPermission { reply, .. } => {
+                        let _ = reply.send(Ok(1));
+                    }
+                    NetworkEvent::HistoryListQuery { reply, .. } => {
+                        let _ = reply.send(Ok((1, response.clone())));
+                    }
+                    NetworkEvent::HistoryGetQuery { reply, .. } => {
+                        let _ = reply.send(Ok((1, body.clone())));
+                    }
+                    _ => panic!("unexpected application event"),
+                }
+            }
+        });
+        let (mut server, mut client) = tokio::io::duplex(65_536);
+        let running = shared.clone();
+        let active = live.clone();
+        let server_task =
+            tokio::spawn(
+                async move { serve_v2_session(&running, &mut server, phone, &active).await },
+            );
         assert!(
-            hello_name(Frame::Hello {
-                version: 2,
-                epoch: [0; 16],
-                name: "x".into()
-            })
-            .is_err()
+            matches!(read_v2_frame(&mut client).await.unwrap(), FrameV2::PeerList { revision: 1, peers } if peers.is_empty())
         );
+        write_v2_frame(
+            &mut client,
+            &FrameV2::HistoryListRequest {
+                cursor: None,
+                limit: 20,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(read_v2_frame(&mut client).await.unwrap(), FrameV2::HistoryListResponse { items, .. } if items.len() == 1 && items[0].event == event)
+        );
+        write_v2_frame(&mut client, &FrameV2::HistoryGet { event })
+            .await
+            .unwrap();
+        let length = match read_v2_frame(&mut client).await.unwrap() {
+            FrameV2::HistoryBody {
+                event: received,
+                metadata,
+            } => {
+                assert_eq!(received, event);
+                metadata.size as usize
+            }
+            _ => panic!("expected body header"),
+        };
+        let mut bytes = vec![0; length];
+        client.read_exact(&mut bytes).await.unwrap();
+        assert_eq!(bytes, b"fixture");
+        server_task.abort();
+        worker.abort();
     }
 }
 

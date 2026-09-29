@@ -112,6 +112,9 @@ pub fn encode_hello(hello: &Hello) -> Result<Vec<u8>, &'static str> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FrameV2 {
+    Select {
+        initiator: DeviceId,
+    },
     PeerList {
         revision: u64,
         peers: Vec<shuttli_model::mobile::PeerHint>,
