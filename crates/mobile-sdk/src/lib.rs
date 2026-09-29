@@ -585,9 +585,10 @@ mod tests {
             &*history.body_for_explicit_copy(event).unwrap(),
             png.as_slice()
         );
-        std::fs::write(&file, b"tampered ciphertext").unwrap();
-        assert!(!history.body_available(event));
+        std::fs::write(&file, vec![0; png.len() + 16]).unwrap();
+        assert!(history.body_available(event));
         assert!(history.body_for_explicit_copy(event).is_none());
+        assert!(!history.body_available(event));
         history.clear();
         assert!(!file.exists());
         let orphan = cache_dir.join("img-orphan.bin");

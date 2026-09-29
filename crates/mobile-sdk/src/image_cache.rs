@@ -121,9 +121,13 @@ impl ImageCache {
             return None;
         }
         let cipher = XChaCha20Poly1305::new((&self.key).into());
-        let body = cipher
-            .decrypt(XNonce::from_slice(&object.nonce), ciphertext.as_slice())
-            .ok()?;
+        let body = match cipher.decrypt(XNonce::from_slice(&object.nonce), ciphertext.as_slice()) {
+            Ok(body) => body,
+            Err(_) => {
+                let _ = fs::remove_file(&object.path);
+                return None;
+            }
+        };
         Some(body.into())
     }
 
