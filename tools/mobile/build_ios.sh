@@ -12,8 +12,8 @@ command -v xcodegen >/dev/null || { echo "Install XcodeGen 2.46.0 first" >&2; ex
 command -v xcodebuild >/dev/null || { echo "Xcode is required" >&2; exit 1; }
 
 case $(uname -m) in
-  arm64) simulator_target=aarch64-apple-ios-sim ;;
-  x86_64) simulator_target=x86_64-apple-ios ;;
+  arm64) simulator_target=aarch64-apple-ios-sim; simulator_arch=arm64 ;;
+  x86_64) simulator_target=x86_64-apple-ios; simulator_arch=x86_64 ;;
   *) echo "Unsupported Mac architecture" >&2; exit 1 ;;
 esac
 device_target=aarch64-apple-ios
@@ -49,4 +49,4 @@ xcodebuild -create-xcframework \
 xcodebuild -project apps/ios/Shuttli.xcodeproj -scheme Shuttli \
   -destination 'generic/platform=iOS Simulator' -sdk iphonesimulator \
   -derivedDataPath target/ios-derived \
-  CODE_SIGNING_ALLOWED=NO build
+  CODE_SIGNING_ALLOWED=NO "ARCHS=$simulator_arch" ONLY_ACTIVE_ARCH=YES build
