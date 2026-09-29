@@ -1,10 +1,11 @@
 use super::service::Service;
 use shuttli_api::control::*;
 use shuttli_core::sync::{Publication, WriteAuthorization};
+use shuttli_model::mobile::HistorySummary;
 use shuttli_model::sync::*;
 use shuttli_ports::sync::*;
 use shuttli_runtime::{block_on, worker};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex, mpsc};
 fn payload(n: u8) -> Payload {
     Payload {
@@ -97,6 +98,7 @@ struct MemoryStore {
     fail: Arc<Mutex<bool>>,
     intent: bool,
     rows: Arc<Mutex<Vec<HistoryEntry>>>,
+    payloads: Arc<Mutex<BTreeMap<EventId, Payload>>>,
 }
 impl Store for MemoryStore {
     fn settings(&self) -> Result<Settings> {
@@ -165,6 +167,7 @@ impl Store for MemoryStore {
             available: true,
             detail: detail.into(),
         });
+        self.payloads.lock().unwrap().insert(event, p.clone());
         Ok(id)
     }
     fn update(&mut self, _: EventId, _: &str, _: DeliveryState, _: &str) -> Result<()> {
@@ -178,6 +181,41 @@ impl Store for MemoryStore {
     }
     fn content(&self, _: i64) -> Result<Payload> {
         Ok(payload(7))
+    }
+    fn local_history(&self, offset: usize, limit: usize) -> Result<(u64, Vec<HistorySummary>)> {
+        let rows = self.rows.lock().unwrap();
+        let payloads = self.payloads.lock().unwrap();
+        let summaries = rows
+            .iter()
+            .rev()
+            .filter(|row| row.direction == "local")
+            .skip(offset)
+            .take(limit)
+            .map(|row| HistorySummary {
+                event: row.event,
+                metadata: payloads.get(&row.event).unwrap().meta.clone(),
+                copied_at_ms: row.time.saturating_mul(1000),
+                body_available: row.available,
+            })
+            .collect();
+        Ok((rows.len() as u64 + 1, summaries))
+    }
+    fn local_content(&self, event: EventId) -> Result<Payload> {
+        if !self
+            .rows
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|row| row.direction == "local" && row.event == event)
+        {
+            return Err("not a local history event".into());
+        }
+        self.payloads
+            .lock()
+            .unwrap()
+            .get(&event)
+            .cloned()
+            .ok_or("missing body".into())
     }
     fn clear(&mut self) -> Result<()> {
         Ok(())
@@ -223,6 +261,7 @@ impl Harness {
             );
         }
         let rows = Arc::new(Mutex::new(Vec::new()));
+        let payloads = Arc::new(Mutex::new(BTreeMap::new()));
         let app = block_on(Service::new(
             [1; 32],
             [1; 16],
@@ -239,6 +278,7 @@ impl Harness {
                     fail: fail.clone(),
                     intent: false,
                     rows: rows.clone(),
+                    payloads,
                 }) as Box<dyn Store>,
             )
             .unwrap(),
@@ -413,6 +453,73 @@ fn receipt_queries_never_expose_another_peers_events() {
     block_on(h.app.tick());
     assert!(rx.recv().unwrap().is_err());
     assert!(h.network.lock().unwrap().sent.is_empty());
+}
+
+#[test]
+fn retained_local_history_requires_current_outgoing_permission_for_list_and_body() {
+    let h = Harness::new();
+    *h.clipboard.lock().unwrap() = value(8);
+    block_on(h.app.tick());
+    let event = h
+        .rows
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|row| row.direction == "local")
+        .unwrap()
+        .event;
+    let (tx, rx) = mpsc::sync_channel(1);
+    h.network
+        .lock()
+        .unwrap()
+        .input
+        .push_back(NetworkEvent::HistoryListQuery {
+            peer: [2; 32],
+            cursor: None,
+            limit: 20,
+            reply: tx,
+        });
+    block_on(h.app.tick());
+    let (policy_revision, page) = rx.recv().unwrap().unwrap();
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].event, event);
+    assert!(page.items[0].body_available);
+    assert_eq!(policy_revision, h.network.lock().unwrap().revision);
+
+    let old = h.settings().peers[&"02".repeat(32)].clone();
+    assert!(matches!(
+        h.command(Action::Peer {
+            id: "02".repeat(32),
+            expected: old.clone(),
+            policy: PeerPolicy { send: false, ..old },
+        }),
+        Answer::Settings { .. }
+    ));
+    let (tx, rx) = mpsc::sync_channel(1);
+    h.network
+        .lock()
+        .unwrap()
+        .input
+        .push_back(NetworkEvent::HistoryGetQuery {
+            peer: [2; 32],
+            event,
+            reply: tx,
+        });
+    block_on(h.app.tick());
+    assert!(rx.recv().unwrap().is_err());
+    let (tx, rx) = mpsc::sync_channel(1);
+    h.network
+        .lock()
+        .unwrap()
+        .input
+        .push_back(NetworkEvent::HistoryListQuery {
+            peer: [2; 32],
+            cursor: None,
+            limit: 20,
+            reply: tx,
+        });
+    block_on(h.app.tick());
+    assert!(rx.recv().unwrap().is_err());
 }
 
 #[test]

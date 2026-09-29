@@ -104,7 +104,12 @@ impl MobileHistory {
                 || item.metadata.size > 8 * 1024 * 1024
                 || !seen.insert(item.event)
                 || self.rows.get(&item.event).is_some_and(|existing| {
-                    existing.source != source || existing.summary.metadata != item.metadata
+                    existing.source != source
+                        || existing.summary.metadata.format != item.metadata.format
+                        || existing.summary.metadata.size != item.metadata.size
+                        || (existing.summary.metadata.digest != item.metadata.digest
+                            && existing.summary.metadata.digest != [0; 32]
+                            && item.metadata.digest != [0; 32])
                 })
             {
                 return Err(HistoryError::InvalidPage);
@@ -285,6 +290,29 @@ mod tests {
         );
         history.clear();
         assert!(history.timeline().is_empty());
+    }
+
+    #[test]
+    fn status_only_digest_can_upgrade_and_revocation_clears_cached_body() {
+        let mut history = MobileHistory::default();
+        let generation = history.enter_foreground();
+        let source = [4; 32];
+        let full = page(source, [5; 16], 1, b"secret");
+        let event = full.items[0].event;
+        let mut status = full.clone();
+        status.items[0].body_available = false;
+        status.items[0].metadata.digest = [0; 32];
+        history
+            .merge_page(generation, source, status.clone(), 1)
+            .unwrap();
+        assert!(history.body_for_explicit_copy(event).is_none());
+        history.merge_page(generation, source, full, 2).unwrap();
+        history
+            .cache_body(generation, event, b"secret".to_vec())
+            .unwrap();
+        assert!(history.body_for_explicit_copy(event).is_some());
+        history.merge_page(generation, source, status, 3).unwrap();
+        assert!(history.body_for_explicit_copy(event).is_none());
     }
 
     #[test]

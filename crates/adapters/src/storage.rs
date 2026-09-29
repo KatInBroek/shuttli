@@ -314,6 +314,16 @@ impl Store for SqlStore {
     fn content(&self, id: i64) -> Result<Payload> {
         self.recent.content(id)
     }
+    fn local_history(
+        &self,
+        offset: usize,
+        limit: usize,
+    ) -> Result<(u64, Vec<shuttli_model::mobile::HistorySummary>)> {
+        Ok(self.recent.local_history(offset, limit))
+    }
+    fn local_content(&self, event: EventId) -> Result<Payload> {
+        self.recent.local_content(event)
+    }
     fn clear(&mut self) -> Result<()> {
         self.recent.clear()
     }
@@ -733,6 +743,17 @@ mod session_history_tests {
                 )
                 .unwrap();
             assert_eq!(s.content(id).is_ok(), mode == HistoryMode::Content);
+            let exported = s.local_history(0, 20).unwrap().1;
+            assert_eq!(exported.len(), usize::from(mode != HistoryMode::Off));
+            if let Some(summary) = exported.first() {
+                assert_eq!(summary.event, event(1));
+                assert_eq!(summary.metadata, p.meta);
+                assert_eq!(summary.body_available, mode == HistoryMode::Content);
+            }
+            assert_eq!(
+                s.local_content(event(1)).is_ok(),
+                mode == HistoryMode::Content
+            );
             assert_eq!(
                 s.history(0, 100).unwrap().is_empty(),
                 mode == HistoryMode::Off
@@ -776,6 +797,7 @@ mod session_history_tests {
         )
         .unwrap();
         assert_eq!(s.history(0, 100).unwrap().len(), 2);
+        assert_eq!(s.local_history(0, 20).unwrap().1.len(), 1);
         s.record(
             event(4),
             "self",

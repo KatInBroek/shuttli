@@ -2,6 +2,7 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use shuttli_api::control::*;
 use shuttli_core::sync::SyncCore;
+use shuttli_model::mobile::{HistoryCursor, HistoryListRequest, HistoryListResponse};
 use shuttli_model::sync::*;
 use shuttli_ports::{sync::*, worker::Port};
 use std::{
@@ -29,6 +30,8 @@ pub struct Service {
     store: Port<dyn Store>,
     platform: Port<dyn Platform>,
     device: String,
+    id: DeviceId,
+    epoch: [u8; 16],
     description: String,
     busy: Cell<bool>,
     stopping: Cell<bool>,
@@ -86,6 +89,8 @@ impl Service {
             store,
             platform,
             device: format_id(id),
+            id,
+            epoch,
             description,
             busy: Cell::new(false),
             stopping: Cell::new(false),
@@ -237,6 +242,17 @@ impl Service {
     }
     async fn network_event(&self, event: NetworkEvent) -> Result<()> {
         match event {
+            NetworkEvent::HistoryListQuery {
+                peer,
+                cursor,
+                limit,
+                reply,
+            } => {
+                let _ = reply.send(self.history_list_for(peer, cursor, limit).await);
+            }
+            NetworkEvent::HistoryGetQuery { peer, event, reply } => {
+                let _ = reply.send(self.history_body_for(peer, event).await);
+            }
             NetworkEvent::ReceiptQuery { peer, event, reply } => {
                 let result = if peer == event.origin {
                     self.store.call(move |s| s.receipt(event)).await
@@ -446,6 +462,104 @@ impl Service {
                 Ok(())
             }));
         }
+    }
+    async fn history_list_for(
+        &self,
+        requester: DeviceId,
+        cursor: Option<HistoryCursor>,
+        limit: u16,
+    ) -> Result<(u64, HistoryListResponse)> {
+        if !(HistoryListRequest { cursor, limit }).valid() {
+            return Err("invalid history page request".into());
+        }
+        self.state
+            .borrow()
+            .core
+            .authorize_peer_hints(requester)
+            .map_err(|e| format!("{e:?}"))?;
+        let offset = cursor.map_or(0, |c| c.offset as usize);
+        if offset > 10_000 || cursor.is_some_and(|c| c.source_epoch != self.epoch) {
+            return Err("stale history cursor".into());
+        }
+        let (revision, mut rows) = self
+            .store
+            .call(move |s| s.local_history(offset, limit as usize + 1))
+            .await?;
+        if cursor.is_some_and(|c| c.revision != revision) {
+            return Err("stale history cursor".into());
+        }
+        let has_next = rows.len() > limit as usize;
+        rows.truncate(limit as usize);
+        let state = self.state.borrow();
+        state
+            .core
+            .authorize_peer_hints(requester)
+            .map_err(|e| format!("{e:?}"))?;
+        rows.retain_mut(|row| {
+            if row.event.origin != self.id || row.event.epoch != self.epoch {
+                return false;
+            }
+            if state
+                .core
+                .authorize_history_export(requester, row.event, &row.metadata, false)
+                .is_err()
+            {
+                return false;
+            }
+            row.body_available &= state
+                .core
+                .authorize_history_export(requester, row.event, &row.metadata, true)
+                .is_ok();
+            if !row.body_available {
+                // A status-only item must not expose a guessable content hash.
+                row.metadata.digest = [0; 32];
+            }
+            true
+        });
+        let next = if has_next {
+            let next_offset = offset
+                .checked_add(limit as usize)
+                .ok_or("history cursor overflow")?;
+            Some(HistoryCursor {
+                source_epoch: self.epoch,
+                revision,
+                offset: next_offset
+                    .try_into()
+                    .map_err(|_| "history cursor overflow")?,
+            })
+        } else {
+            None
+        };
+        Ok((
+            state.core.revision(),
+            HistoryListResponse {
+                source_epoch: self.epoch,
+                revision,
+                items: rows,
+                next,
+            },
+        ))
+    }
+    async fn history_body_for(
+        &self,
+        requester: DeviceId,
+        event: EventId,
+    ) -> Result<(u64, Payload)> {
+        if event.origin != self.id || event.epoch != self.epoch || event.seq == 0 {
+            return Err("history event is not local to this session".into());
+        }
+        self.state
+            .borrow()
+            .core
+            .authorize_peer_hints(requester)
+            .map_err(|e| format!("{e:?}"))?;
+        let payload = self.store.call(move |s| s.local_content(event)).await?;
+        let state = self.state.borrow();
+        state
+            .core
+            .authorize_history_export(requester, event, &payload.meta, true)
+            .map_err(|e| format!("{e:?}"))?;
+        Ok((state.core.revision(), payload))
     }
     async fn configure(&self, settings: Settings) -> Result<Answer> {
         if !settings.validate() {
