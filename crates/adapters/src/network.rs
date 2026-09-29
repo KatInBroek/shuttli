@@ -470,11 +470,12 @@ async fn connect(s: Arc<Shared>, address: SocketAddr) -> Result<()> {
             {
                 Frame::Idle => {}
                 Frame::Status { event } => answer_query(&s, &mut tls, id, event).await?,
-                Frame::Offer { event, meta } => {
-                    timeout(DEADLINE, receive_transfer(&s, &mut tls, id, event, meta))
-                        .await
-                        .map_err(|_| "receive timed out")??
-                }
+                Frame::Offer { event, meta } => timeout(
+                    DEADLINE,
+                    receive_transfer(&s, &mut tls, id, event, meta, false),
+                )
+                .await
+                .map_err(|_| "receive timed out")??,
                 _ => return Err("unexpected poll response".into()),
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
@@ -580,11 +581,12 @@ async fn incoming_connection(s: Arc<Shared>, stream: TcpStream, address: SocketA
                 .await
                 .map_err(|_| "session idle timeout")??
             {
-                Frame::Offer { event, meta } => {
-                    timeout(DEADLINE, receive_transfer(&s, &mut tls, id, event, meta))
-                        .await
-                        .map_err(|_| "receive timed out")??
-                }
+                Frame::Offer { event, meta } => timeout(
+                    DEADLINE,
+                    receive_transfer(&s, &mut tls, id, event, meta, false),
+                )
+                .await
+                .map_err(|_| "receive timed out")??,
                 Frame::Status { event } => answer_query(&s, &mut tls, id, event).await?,
                 Frame::Poll => {
                     if let Some(query) = take_query(&s, id).await {
@@ -776,6 +778,11 @@ async fn serve_v2_session(
                         .await?
                     }
                 }
+            }
+            FrameV2::Offer { event, meta } => {
+                timeout(DEADLINE, receive_transfer(s, tls, id, event, meta, true))
+                    .await
+                    .map_err(|_| "receive timed out")??;
             }
             _ => return Err("unsupported v2 operation".into()),
         }
@@ -975,12 +982,43 @@ impl Drop for ReceiveGuard {
         }
     }
 }
+enum ReceiveReply<'a> {
+    Ready,
+    Applied,
+    Error(&'a str),
+}
+async fn write_receive_reply(
+    tls: &mut impl Duplex,
+    v2: bool,
+    reply: ReceiveReply<'_>,
+) -> Result<()> {
+    if v2 {
+        let frame = match reply {
+            ReceiveReply::Ready => FrameV2::Ready,
+            ReceiveReply::Applied => FrameV2::Applied,
+            ReceiveReply::Error(_) => FrameV2::Error {
+                code: "offer_rejected".into(),
+            },
+        };
+        write_v2_frame(tls, &frame).await
+    } else {
+        let frame = match reply {
+            ReceiveReply::Ready => Frame::Ready,
+            ReceiveReply::Applied => Frame::Applied,
+            ReceiveReply::Error(message) => Frame::Error {
+                message: message.into(),
+            },
+        };
+        write_frame(tls, &frame).await
+    }
+}
 async fn receive_transfer(
     s: &Shared,
     tls: &mut impl Duplex,
     id: DeviceId,
     event: EventId,
     meta: Metadata,
+    v2: bool,
 ) -> Result<()> {
     let mut guard = ReceiveGuard {
         permit: Some(
@@ -1019,11 +1057,10 @@ async fn receive_transfer(
         Ok(slot) => slot,
         Err(_) => {
             guard.active = false;
-            write_frame(
+            write_receive_reply(
                 tls,
-                &Frame::Error {
-                    message: "global receive capacity reached".into(),
-                },
+                v2,
+                ReceiveReply::Error("global receive capacity reached"),
             )
             .await?;
             return Ok(());
@@ -1045,11 +1082,11 @@ async fn receive_transfer(
     let ticket = match decision {
         Ok(t) => t,
         Err(e) => {
-            write_frame(tls, &Frame::Error { message: e }).await?;
+            write_receive_reply(tls, v2, ReceiveReply::Error(&e)).await?;
             return Ok(());
         }
     };
-    write_frame(tls, &Frame::Ready).await?;
+    write_receive_reply(tls, v2, ReceiveReply::Ready).await?;
     let mut bytes = vec![0; meta.size as usize];
     for chunk in bytes.chunks_mut(65536) {
         if s.revision.load(Ordering::SeqCst) != ticket.policy_revision() {
@@ -1083,14 +1120,10 @@ async fn receive_transfer(
         .map_err(|_| "receiver stopped")?
         .map_err(|_| "application timeout")?;
     guard.active = false;
-    write_frame(
-        tls,
-        &match result {
-            Ok(()) => Frame::Applied,
-            Err(e) => Frame::Error { message: e },
-        },
-    )
-    .await
+    match result {
+        Ok(()) => write_receive_reply(tls, v2, ReceiveReply::Applied).await,
+        Err(e) => write_receive_reply(tls, v2, ReceiveReply::Error(&e)).await,
+    }
 }
 #[cfg(test)]
 mod tests {

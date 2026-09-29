@@ -33,6 +33,8 @@ final class AppState: ObservableObject {
     @Published private(set) var historyCount: UInt32 = 0
     @Published private(set) var historyRows: [MobileHistoryRow] = []
     @Published private(set) var deviceRows: [MobileDeviceRow] = []
+    @Published private(set) var transferRows: [MobileTransferRow] = []
+    @Published private(set) var sendStatusKey: String?
     @Published private(set) var copyStatusKey: String?
     @Published private(set) var connectedPeerCount: UInt32 = 0
     @Published private(set) var connectionStatusKey = "waiting_for_devices"
@@ -77,6 +79,7 @@ final class AppState: ObservableObject {
         historyRows = session.historyRows()
         historyCount = UInt32(historyRows.count)
         deviceRows = session.deviceRows()
+        transferRows = session.transferRows()
         connectedPeerCount = session.connectedPeersCount()
         if connectedPeerCount > 0 { connectionStatusKey = "devices_connected" }
     }
@@ -108,6 +111,23 @@ final class AppState: ObservableObject {
 
     func setReceive(_ enabled: Bool, for row: MobileDeviceRow) {
         _ = session.setReceive(peerId: row.id, enabled: enabled)
+        updateSnapshot()
+    }
+
+    func setSend(_ enabled: Bool, for row: MobileDeviceRow) {
+        _ = session.setSend(peerId: row.id, enabled: enabled)
+        updateSnapshot()
+    }
+
+    var allowedSendCount: Int {
+        deviceRows.filter { $0.online && $0.send }.count
+    }
+
+    func sendDraft() {
+        guard let draft else { return }
+        let queued = session.sendText(text: draft)
+        sendStatusKey = queued > 0 ? "send_queued" : "no_send_targets"
+        if queued > 0 { self.draft = nil }
         updateSnapshot()
     }
 

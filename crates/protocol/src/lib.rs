@@ -115,6 +115,12 @@ pub enum FrameV2 {
     Select {
         initiator: DeviceId,
     },
+    Offer {
+        event: EventId,
+        meta: Metadata,
+    },
+    Ready,
+    Applied,
     PeerList {
         revision: u64,
         peers: Vec<shuttli_model::mobile::PeerHint>,
@@ -184,6 +190,11 @@ impl FrameV2 {
             }
             Self::HistoryChanged { revision } if *revision == 0 => Err("invalid revision"),
             Self::HistoryGet { event } if event.seq == 0 => Err("invalid event"),
+            Self::Offer { event, meta }
+                if event.seq == 0 || meta.size == 0 || meta.size > 8 * 1024 * 1024 =>
+            {
+                Err("invalid offer")
+            }
             Self::HistoryBody { event, metadata }
                 if event.seq == 0 || metadata.size > 8 * 1024 * 1024 =>
             {

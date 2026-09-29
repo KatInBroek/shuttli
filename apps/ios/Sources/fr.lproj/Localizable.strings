@@ -37,3 +37,12 @@
 "clear" = "Effacer";
 "cancel" = "Annuler";
 "clear_history_help" = "Cela efface le cache de ce téléphone. Les ordinateurs autorisés pourront à nouveau fournir les copies conservées lors de la prochaine actualisation.";
+"send_to_device" = "Autoriser l’envoi à cet appareil";
+"sent_from_phone" = "Envoyé depuis ce téléphone";
+"send_queued" = "Envoi aux appareils autorisés";
+"no_send_targets" = "Autorisez d’abord l’envoi vers au moins un appareil connecté";
+"transfer_queued" = "En attente";
+"transfer_sending" = "Envoi en cours";
+"transfer_applied" = "Appliqué sur l’appareil";
+"transfer_failed" = "Échec";
+"transfer_unknown" = "Résultat inconnu";

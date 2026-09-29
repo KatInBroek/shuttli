@@ -37,3 +37,12 @@
 "clear" = "Clear";
 "cancel" = "Cancel";
 "clear_history_help" = "This clears the cache on this phone. Permitted computers may provide retained copies again on the next refresh.";
+"send_to_device" = "Allow sending to this device";
+"sent_from_phone" = "Sent from this phone";
+"send_queued" = "Sending to permitted devices";
+"no_send_targets" = "Allow sending to at least one connected device first";
+"transfer_queued" = "Queued";
+"transfer_sending" = "Sending";
+"transfer_applied" = "Applied on device";
+"transfer_failed" = "Failed";
+"transfer_unknown" = "Outcome unknown";

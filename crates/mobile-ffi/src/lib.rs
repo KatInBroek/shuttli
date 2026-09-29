@@ -1,12 +1,19 @@
 //! Small, versioned native boundary. Only UI-safe operations cross UniFFI;
 //! authority tickets, TLS state and database handles remain in Rust.
+use sha2::{Digest, Sha256};
 use shuttli_mobile_sdk::{
-    Identity, MobileHistory, peers::PeerDirectory, transport::MobileTransport,
+    Identity, MobileHistory,
+    peers::PeerDirectory,
+    transport::{MobileTransport, SendCommand, SendResults, SendState},
 };
-use shuttli_model::sync::{EventId, Format};
+use shuttli_model::sync::{EventId, Format, Metadata};
 use std::{
+    collections::BTreeMap,
     net::Ipv4Addr,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 uniffi::setup_scaffolding!();
@@ -46,6 +53,23 @@ pub struct MobileDeviceRow {
     pub receive: bool,
 }
 
+#[derive(Clone, uniffi::Enum)]
+pub enum MobileTransferState {
+    Queued,
+    Sending,
+    Applied,
+    Failed,
+    Unknown,
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct MobileTransferRow {
+    pub event_key: String,
+    pub target_id: String,
+    pub target_name: String,
+    pub state: MobileTransferState,
+}
+
 fn event_key(event: EventId) -> String {
     let mut bytes = Vec::with_capacity(56);
     bytes.extend_from_slice(&event.origin);
@@ -71,6 +95,8 @@ pub struct MobileSession {
     history: Arc<Mutex<MobileHistory>>,
     peers: Mutex<Option<Arc<Mutex<PeerDirectory>>>>,
     listener: Mutex<Option<MobileTransport>>,
+    results: SendResults,
+    sequence: AtomicU64,
 }
 
 #[uniffi::export]
@@ -81,6 +107,8 @@ impl MobileSession {
             history: Arc::new(Mutex::new(MobileHistory::default())),
             peers: Mutex::new(None),
             listener: Mutex::new(None),
+            results: Arc::new(Mutex::new(BTreeMap::new())),
+            sequence: AtomicU64::new(1),
         }
     }
 
@@ -146,7 +174,14 @@ impl MobileSession {
         if listener.is_some() {
             return String::new();
         }
-        match MobileTransport::start(ip, identity, name, self.history.clone(), peers) {
+        match MobileTransport::start(
+            ip,
+            identity,
+            name,
+            self.history.clone(),
+            peers,
+            self.results.clone(),
+        ) {
             Ok(started) => {
                 *listener = Some(started);
                 String::new()
@@ -276,6 +311,133 @@ impl MobileSession {
                     )
                     .is_ok()
             })
+    }
+
+    pub fn set_send(&self, peer_id: String, enabled: bool) -> bool {
+        let Ok(bytes) = hex::decode(peer_id) else {
+            return false;
+        };
+        let Ok(id) = <[u8; 32]>::try_from(bytes) else {
+            return false;
+        };
+        self.peers
+            .lock()
+            .expect("mobile peers lock")
+            .as_ref()
+            .is_some_and(|peers| {
+                let Ok(mut directory) = peers.lock() else {
+                    return false;
+                };
+                let Some(peer) = directory.direct().into_iter().find(|p| p.id == id) else {
+                    return false;
+                };
+                directory
+                    .directions(
+                        id,
+                        shuttli_mobile_sdk::peers::Directions {
+                            send: enabled,
+                            ..peer.directions
+                        },
+                    )
+                    .is_ok()
+            })
+    }
+
+    pub fn send_text(&self, text: String) -> u32 {
+        if text.is_empty() || text.len() > 1024 * 1024 || text.chars().any(|c| c == '\0') {
+            return 0;
+        }
+        let listener = self.listener.lock().expect("mobile listener lock");
+        let Some(listener) = listener.as_ref() else {
+            return 0;
+        };
+        let directory = self.peers.lock().expect("mobile peers lock");
+        let Some(directory) = directory.as_ref() else {
+            return 0;
+        };
+        let directory = directory.lock().expect("mobile directory lock");
+        let targets: Vec<_> = directory
+            .direct()
+            .into_iter()
+            .filter(|p| p.online && p.directions.send)
+            .collect();
+        if targets.is_empty() {
+            return 0;
+        }
+        let seq = self.sequence.fetch_add(1, Ordering::SeqCst);
+        if seq == 0 || seq == u64::MAX {
+            return 0;
+        }
+        let event = EventId {
+            origin: directory.own_id(),
+            epoch: listener.epoch(),
+            seq,
+        };
+        let bytes: Arc<[u8]> = text.into_bytes().into();
+        let metadata = Metadata {
+            format: Format::Text,
+            size: bytes.len() as u64,
+            digest: Sha256::digest(&bytes).into(),
+        };
+        let mut queued = 0;
+        let mut results = self.results.lock().expect("mobile results lock");
+        for target in targets {
+            let command = SendCommand {
+                event,
+                target: target.id,
+                metadata: metadata.clone(),
+                body: bytes.clone(),
+            };
+            let state = if listener.enqueue(command) {
+                queued += 1;
+                SendState::Queued
+            } else {
+                SendState::Failed
+            };
+            results.insert((event, target.id), state);
+        }
+        while results.len() > 100 {
+            results.pop_first();
+        }
+        queued
+    }
+
+    pub fn transfer_rows(&self) -> Vec<MobileTransferRow> {
+        let names: BTreeMap<_, _> = self
+            .peers
+            .lock()
+            .expect("mobile peers lock")
+            .as_ref()
+            .map_or_else(BTreeMap::new, |peers| {
+                peers
+                    .lock()
+                    .expect("mobile directory lock")
+                    .direct()
+                    .into_iter()
+                    .map(|p| (p.id, p.name))
+                    .collect()
+            });
+        self.results
+            .lock()
+            .expect("mobile results lock")
+            .iter()
+            .rev()
+            .map(|((event, target), state)| MobileTransferRow {
+                event_key: event_key(*event),
+                target_id: hex::encode(target),
+                target_name: names
+                    .get(target)
+                    .cloned()
+                    .unwrap_or_else(|| hex::encode(&target[..4])),
+                state: match state {
+                    SendState::Queued => MobileTransferState::Queued,
+                    SendState::Sending => MobileTransferState::Sending,
+                    SendState::Applied => MobileTransferState::Applied,
+                    SendState::Failed => MobileTransferState::Failed,
+                    SendState::Unknown => MobileTransferState::Unknown,
+                },
+            })
+            .collect()
     }
 }
 

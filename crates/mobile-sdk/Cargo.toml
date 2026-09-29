@@ -20,3 +20,5 @@ shuttli-identity.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 tokio-rustls.workspace = true
+rustls.workspace = true
+getrandom.workspace = true

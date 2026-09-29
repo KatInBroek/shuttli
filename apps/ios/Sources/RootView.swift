@@ -36,8 +36,11 @@ private struct HomeView: View {
                         Text(draft)
                             .lineLimit(5)
                             .textSelection(.enabled)
-                        Button("send_to_devices") {}
-                            .disabled(true)
+                        Button("send_to_devices") { state.sendDraft() }
+                            .disabled(state.allowedSendCount == 0)
+                    }
+                    if let status = state.sendStatusKey {
+                        Text(LocalizedStringKey(status)).foregroundStyle(.secondary)
                     }
                 }
                 Section("recent_history") {
@@ -46,6 +49,13 @@ private struct HomeView: View {
                     } else {
                         ForEach(Array(state.historyRows.prefix(3)), id: \.eventKey) { row in
                             HistoryRowLink(row: row)
+                        }
+                    }
+                }
+                if !state.transferRows.isEmpty {
+                    Section("sent_from_phone") {
+                        ForEach(state.transferRows.prefix(3), id: \.uniqueID) { transfer in
+                            TransferRowView(row: transfer)
                         }
                     }
                 }
@@ -61,17 +71,52 @@ private struct HistoryView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if state.historyRows.isEmpty {
+                if state.historyRows.isEmpty && state.transferRows.isEmpty {
                     EmptyState(symbol: "clock", title: "history_empty", detail: "history_help")
                 } else {
-                    List(state.historyRows, id: \.eventKey) { row in
-                        HistoryRowLink(row: row)
+                    List {
+                        ForEach(state.historyRows, id: \.eventKey) { row in
+                            HistoryRowLink(row: row)
+                        }
+                        if !state.transferRows.isEmpty {
+                            Section("sent_from_phone") {
+                                ForEach(state.transferRows, id: \.uniqueID) { transfer in
+                                    TransferRowView(row: transfer)
+                                }
+                            }
+                        }
                     }
                 }
             }
             .navigationTitle("history")
         }
     }
+}
+
+private struct TransferRowView: View {
+    let row: MobileTransferRow
+
+    var body: some View {
+        HStack {
+            Text(row.targetName)
+            Spacer()
+            Text(LocalizedStringKey(statusKey)).foregroundStyle(.secondary)
+        }
+    }
+
+    private var statusKey: String {
+        switch row.state {
+        case .queued: "transfer_queued"
+        case .sending: "transfer_sending"
+        case .applied: "transfer_applied"
+        case .failed: "transfer_failed"
+        case .unknown: "transfer_unknown"
+        }
+    }
+}
+
+private extension MobileTransferRow {
+    var uniqueID: String { eventKey + targetId }
 }
 
 private struct HistoryRowLink: View {
@@ -163,6 +208,10 @@ private struct DevicesView: View {
                             Toggle("receive_from_device", isOn: Binding(
                                 get: { state.deviceRows.first(where: { $0.id == device.id })?.receive ?? device.receive },
                                 set: { state.setReceive($0, for: device) }
+                            ))
+                            Toggle("send_to_device", isOn: Binding(
+                                get: { state.deviceRows.first(where: { $0.id == device.id })?.send ?? device.send },
+                                set: { state.setSend($0, for: device) }
                             ))
                             Text("manual_send_only").foregroundStyle(.secondary)
                         }

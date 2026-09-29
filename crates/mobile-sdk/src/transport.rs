@@ -1,25 +1,29 @@
 //! Foreground-only mobile transport. The caller supplies a Tailscale IPv4
 //! address; no VPN/private API or public-interface listener is opened here.
-use crate::{MobileHistory, peers::PeerDirectory};
+use crate::{
+    MobileHistory,
+    peers::{Candidate, PeerDirectory},
+};
+use sha2::{Digest, Sha256};
 use shuttli_identity::{Identity, device_id};
 use shuttli_model::{
     mobile::Capabilities,
-    sync::{DeviceId, EventId},
+    sync::{DeviceId, EventId, Format, Metadata},
 };
 use shuttli_protocol::{FrameV2, Hello, decode_hello, encode_hello};
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
-    sync::{Semaphore, watch},
+    sync::{Semaphore, mpsc, watch},
     time::timeout,
 };
-use tokio_rustls::TlsAcceptor;
+use tokio_rustls::{TlsAcceptor, TlsConnector};
 
 const PORT: u16 = 45987;
 type Result<T> = std::result::Result<T, String>;
@@ -30,9 +34,30 @@ pub fn tailscale_ipv4(ip: Ipv4Addr) -> bool {
 }
 
 pub struct MobileTransport {
+    epoch: [u8; 16],
     stop: watch::Sender<bool>,
+    commands: mpsc::Sender<SendCommand>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SendState {
+    Queued,
+    Sending,
+    Applied,
+    Failed,
+    Unknown,
+}
+
+#[derive(Clone)]
+pub struct SendCommand {
+    pub event: EventId,
+    pub target: DeviceId,
+    pub metadata: Metadata,
+    pub body: Arc<[u8]>,
+}
+
+pub type SendResults = Arc<Mutex<BTreeMap<(EventId, DeviceId), SendState>>>;
 
 impl MobileTransport {
     pub fn start(
@@ -41,6 +66,7 @@ impl MobileTransport {
         name: String,
         history: Arc<Mutex<MobileHistory>>,
         peers: Arc<Mutex<PeerDirectory>>,
+        results: SendResults,
     ) -> Result<Self> {
         if !tailscale_ipv4(bind_ip)
             || name.is_empty()
@@ -51,7 +77,20 @@ impl MobileTransport {
         }
         let listener = std::net::TcpListener::bind((bind_ip, PORT)).map_err(|e| e.to_string())?;
         listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+        let mut epoch = [0; 16];
+        getrandom::getrandom(&mut epoch).map_err(|e| e.to_string())?;
         let (stop, receiver) = watch::channel(false);
+        let (commands, command_rx) = mpsc::channel(16);
+        let context = SessionContext {
+            identity: Arc::new(identity),
+            name,
+            epoch,
+            history,
+            peers,
+            results,
+            routes: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
+            stop: receiver.clone(),
+        };
         let thread = std::thread::Builder::new()
             .name("shuttli-mobile".into())
             .spawn(move || {
@@ -60,15 +99,23 @@ impl MobileTransport {
                     .max_blocking_threads(2)
                     .build()
                     .expect("mobile runtime");
-                runtime.block_on(run_listener(
-                    listener, identity, name, history, peers, receiver,
-                ));
+                runtime.block_on(run_listener(listener, context, command_rx, receiver));
             })
             .map_err(|e| e.to_string())?;
         Ok(Self {
+            epoch,
             stop,
+            commands,
             thread: Some(thread),
         })
+    }
+
+    pub fn epoch(&self) -> [u8; 16] {
+        self.epoch
+    }
+
+    pub fn enqueue(&self, command: SendCommand) -> bool {
+        self.commands.try_send(command).is_ok()
     }
 
     pub fn stop(&mut self) {
@@ -87,50 +134,79 @@ impl Drop for MobileTransport {
 
 async fn run_listener(
     listener: std::net::TcpListener,
-    identity: Identity,
-    name: String,
-    history: Arc<Mutex<MobileHistory>>,
-    peers: Arc<Mutex<PeerDirectory>>,
+    context: SessionContext,
+    mut commands: mpsc::Receiver<SendCommand>,
     mut stop: watch::Receiver<bool>,
 ) {
     let Ok(listener) = TcpListener::from_std(listener) else {
         return;
     };
-    let identity = Arc::new(identity);
     let slots = Arc::new(Semaphore::new(16));
+    let mut refresh = tokio::time::interval(Duration::from_secs(15));
+    let mut attempts = BTreeMap::<DeviceId, Instant>::new();
     loop {
         tokio::select! {
             _ = stop.changed() => { if *stop.borrow() { break; } }
+            command = commands.recv() => {
+                let Some(command) = command else { break; };
+                let route = context.routes.lock().await.get(&command.target).cloned();
+                if route.is_none_or(|route| route.try_send(command.clone()).is_err()) {
+                    if let Ok(mut results) = context.results.lock() {
+                        results.insert((command.event, command.target), SendState::Failed);
+                    }
+                }
+            }
+            _ = refresh.tick() => {
+                let candidates = {
+                    let Ok(mut directory) = context.peers.lock() else { continue; };
+                    directory.expire(now_ms());
+                    directory.candidates()
+                };
+                let mut launched = 0;
+                for candidate in candidates {
+                    if launched >= 4 { break; }
+                    if attempts.get(&candidate.hint.id).is_some_and(|last| last.elapsed() < Duration::from_secs(30)) { continue; }
+                    attempts.insert(candidate.hint.id, Instant::now());
+                    launched += 1;
+                    let context = context.clone();
+                    tokio::spawn(async move { let _ = connect_candidate(candidate, context).await; });
+                }
+                attempts.retain(|_, last| last.elapsed() < Duration::from_secs(60));
+            }
             incoming = listener.accept() => {
                 let Ok((stream, address)) = incoming else { continue; };
                 if !matches!(address.ip(), IpAddr::V4(ip) if tailscale_ipv4(ip)) { continue; }
                 let Ok(slot) = slots.clone().try_acquire_owned() else { continue; };
-                let identity = identity.clone();
-                let history = history.clone();
-                let peers = peers.clone();
-                let name = name.clone();
-                let stop = stop.clone();
+                let context = context.clone();
                 tokio::spawn(async move {
                     let _slot = slot;
-                    let _ = accept_desktop(stream, address, identity, name, history, peers, stop).await;
+                    let _ = accept_desktop(stream, address, context).await;
                 });
             }
         }
     }
 }
 
+#[derive(Clone)]
+struct SessionContext {
+    identity: Arc<Identity>,
+    name: String,
+    epoch: [u8; 16],
+    history: Arc<Mutex<MobileHistory>>,
+    peers: Arc<Mutex<PeerDirectory>>,
+    results: SendResults,
+    routes: Arc<tokio::sync::Mutex<BTreeMap<DeviceId, mpsc::Sender<SendCommand>>>>,
+    stop: watch::Receiver<bool>,
+}
+
 async fn accept_desktop(
     stream: TcpStream,
     address: SocketAddr,
-    identity: Arc<Identity>,
-    name: String,
-    history: Arc<Mutex<MobileHistory>>,
-    peers: Arc<Mutex<PeerDirectory>>,
-    stop: watch::Receiver<bool>,
+    context: SessionContext,
 ) -> Result<()> {
     let mut tls = timeout(
         Duration::from_secs(5),
-        TlsAcceptor::from(identity.server.clone()).accept(stream),
+        TlsAcceptor::from(context.identity.server.clone()).accept(stream),
     )
     .await
     .map_err(|_| "TLS timeout")?
@@ -152,8 +228,8 @@ async fn accept_desktop(
     write_hello(
         &mut tls,
         &Hello::V2 {
-            name,
-            epoch: [0; 16],
+            name: context.name.clone(),
+            epoch: context.epoch,
             capabilities: Capabilities::pull_only(),
         },
     )
@@ -170,26 +246,127 @@ async fn accept_desktop(
     )
     .await?;
     let endpoint = SocketAddr::new(address.ip(), PORT).to_string();
-    peers
+    context
+        .peers
         .lock()
         .map_err(|_| "peer directory unavailable")?
         .observed_direct(remote_id, remote_name, endpoint, Capabilities::desktop())
         .map_err(|e| format!("{e:?}"))?;
-    let generation = history
+    let generation = context
+        .history
         .lock()
         .map_err(|_| "history unavailable")?
         .generation();
+    let (sender, commands) = mpsc::channel(8);
+    context.routes.lock().await.insert(remote_id, sender);
     let result = mobile_session(
         &mut tls,
         remote_id,
         remote_epoch,
         generation,
-        history,
-        peers.clone(),
-        stop,
+        &context,
+        commands,
     )
     .await;
-    if let Ok(mut directory) = peers.lock() {
+    context.routes.lock().await.remove(&remote_id);
+    if let Ok(mut directory) = context.peers.lock() {
+        directory.disconnected(remote_id);
+    }
+    result
+}
+
+async fn connect_candidate(candidate: Candidate, context: SessionContext) -> Result<()> {
+    let address: SocketAddr = candidate
+        .hint
+        .endpoint
+        .parse()
+        .map_err(|_| "invalid hinted endpoint")?;
+    if !matches!(address.ip(), IpAddr::V4(ip) if tailscale_ipv4(ip)) {
+        return Err("invalid hinted network".into());
+    }
+    let stream = timeout(Duration::from_secs(5), TcpStream::connect(address))
+        .await
+        .map_err(|_| "connection timeout")?
+        .map_err(|e| e.to_string())?;
+    let server_name = rustls::pki_types::ServerName::try_from("shuttli.local")
+        .map_err(|_| "invalid server name")?;
+    let mut tls = timeout(
+        Duration::from_secs(5),
+        TlsConnector::from(context.identity.client.clone()).connect(server_name, stream),
+    )
+    .await
+    .map_err(|_| "TLS timeout")?
+    .map_err(|e| e.to_string())?;
+    let remote_id = device_id(
+        tls.get_ref()
+            .1
+            .peer_certificates()
+            .and_then(|certs| certs.first())
+            .ok_or("missing hinted identity")?
+            .as_ref(),
+    )?;
+    if remote_id != candidate.hint.id {
+        return Err("hinted identity mismatch".into());
+    }
+    write_hello(
+        &mut tls,
+        &Hello::V2 {
+            name: context.name.clone(),
+            epoch: context.epoch,
+            capabilities: Capabilities::pull_only(),
+        },
+    )
+    .await?;
+    let (remote_name, remote_epoch, capabilities) =
+        match timeout(Duration::from_secs(5), read_hello(&mut tls))
+            .await
+            .map_err(|_| "HELLO timeout")??
+        {
+            Hello::V2 {
+                name,
+                epoch,
+                capabilities,
+            } => (name, epoch, capabilities),
+            Hello::V1 { .. } => return Err("peer does not support history pull".into()),
+        };
+    if !capabilities.history_pull {
+        return Err("peer does not support history pull".into());
+    }
+    write_frame(
+        &mut tls,
+        &FrameV2::Select {
+            initiator: context.identity.id,
+        },
+    )
+    .await?;
+    if !matches!(read_frame(&mut tls).await?, FrameV2::Select { initiator } if initiator == context.identity.id)
+    {
+        return Err("session selection mismatch".into());
+    }
+    context
+        .peers
+        .lock()
+        .map_err(|_| "peer directory unavailable")?
+        .observed_direct(remote_id, remote_name, address.to_string(), capabilities)
+        .map_err(|e| format!("{e:?}"))?;
+    let generation = context
+        .history
+        .lock()
+        .map_err(|_| "history unavailable")?
+        .generation();
+    let (sender, commands) = mpsc::channel(8);
+    context.routes.lock().await.insert(remote_id, sender);
+    let result = mobile_session(
+        &mut tls,
+        remote_id,
+        remote_epoch,
+        generation,
+        &context,
+        commands,
+    )
+    .await;
+    context.routes.lock().await.remove(&remote_id);
+    if let Ok(mut directory) = context.peers.lock() {
         directory.disconnected(remote_id);
     }
     result
@@ -200,10 +377,12 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
     source: DeviceId,
     source_epoch: [u8; 16],
     generation: u64,
-    history: Arc<Mutex<MobileHistory>>,
-    peers: Arc<Mutex<PeerDirectory>>,
-    mut stop: watch::Receiver<bool>,
+    context: &SessionContext,
+    mut commands: mpsc::Receiver<SendCommand>,
 ) -> Result<()> {
+    let history = &context.history;
+    let peers = &context.peers;
+    let mut stop = context.stop.clone();
     let mut pending_list = false;
     let mut pending_body: Option<EventId> = None;
     let mut body_queue = VecDeque::new();
@@ -213,6 +392,18 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
     loop {
         tokio::select! {
             _ = stop.changed() => { if *stop.borrow() { return Ok(()); } }
+            command = commands.recv(), if !pending_list && pending_body.is_none() => {
+                if let Some(command) = command {
+                    let outcome = if command.target != source { SendState::Failed } else { match timeout(Duration::from_secs(20), send_offer(stream, &command, context)).await {
+                        Ok(Ok(state)) => state,
+                        _ => SendState::Unknown,
+                    }};
+                    if let Ok(mut results) = context.results.lock() {
+                        results.insert((command.event, command.target), outcome);
+                    }
+                    if outcome == SendState::Unknown { return Err("outgoing transfer outcome unknown".into()); }
+                }
+            }
             _ = refresh.tick() => {
                 if !pending_list && pending_body.is_none() && peers.lock().map_err(|_| "peer directory unavailable")?
                     .direct().iter().any(|p| p.id == source && p.directions.receive) {
@@ -288,6 +479,90 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                 }
             }
         }
+    }
+}
+
+fn permitted_to_send(context: &SessionContext, target: DeviceId) -> bool {
+    context.peers.lock().ok().is_some_and(|directory| {
+        directory
+            .direct()
+            .iter()
+            .any(|peer| peer.id == target && peer.online && peer.directions.send)
+    })
+}
+
+async fn offer_reply<S: AsyncRead + AsyncWrite + Unpin>(
+    stream: &mut S,
+    source: DeviceId,
+    context: &SessionContext,
+) -> Result<FrameV2> {
+    loop {
+        match read_frame(stream).await? {
+            FrameV2::PeerList { revision, peers } => {
+                context
+                    .peers
+                    .lock()
+                    .map_err(|_| "peer directory unavailable")?
+                    .accept_hints(
+                        source,
+                        shuttli_model::mobile::PeerList { revision, peers },
+                        now_ms(),
+                    )
+                    .map_err(|e| format!("{e:?}"))?;
+            }
+            FrameV2::HistoryChanged { .. } => {}
+            response @ (FrameV2::Ready | FrameV2::Applied | FrameV2::Error { .. }) => {
+                return Ok(response);
+            }
+            _ => return Err("unexpected transfer response".into()),
+        }
+    }
+}
+
+async fn send_offer<S: AsyncRead + AsyncWrite + Unpin>(
+    stream: &mut S,
+    command: &SendCommand,
+    context: &SessionContext,
+) -> Result<SendState> {
+    if command.event.origin != context.identity.id
+        || command.event.epoch != context.epoch
+        || command.event.seq == 0
+        || !permitted_to_send(context, command.target)
+        || command.metadata.size != command.body.len() as u64
+        || command.metadata.size == 0
+        || command.metadata.size > 8 * 1024 * 1024
+        || matches!(command.metadata.format, Format::Text) && command.metadata.size > 1024 * 1024
+        || Sha256::digest(&command.body).as_slice() != command.metadata.digest
+    {
+        return Ok(SendState::Failed);
+    }
+    write_frame(
+        stream,
+        &FrameV2::Offer {
+            event: command.event,
+            meta: command.metadata.clone(),
+        },
+    )
+    .await?;
+    match offer_reply(stream, command.target, context).await? {
+        FrameV2::Ready => {}
+        FrameV2::Error { .. } => return Ok(SendState::Failed),
+        _ => return Err("missing READY".into()),
+    }
+    if let Ok(mut results) = context.results.lock() {
+        results.insert((command.event, command.target), SendState::Sending);
+    }
+    for chunk in command.body.chunks(65_536) {
+        if !permitted_to_send(context, command.target) {
+            return Err("send permission changed".into());
+        }
+        stream.write_all(chunk).await.map_err(|e| e.to_string())?;
+    }
+    stream.flush().await.map_err(|e| e.to_string())?;
+    match offer_reply(stream, command.target, context).await? {
+        FrameV2::Applied => Ok(SendState::Applied),
+        FrameV2::Error { .. } => Ok(SendState::Failed),
+        _ => Err("missing APPLIED".into()),
     }
 }
 
@@ -393,13 +668,19 @@ mod tests {
             .unwrap();
         let (stop, receiver) = watch::channel(false);
         let (mut phone, mut desktop) = tokio::io::duplex(65_536);
-        let cache = history.clone();
-        let directory = peers.clone();
+        let (command_sender, commands) = mpsc::channel(8);
+        let context = SessionContext {
+            identity: Arc::new(Identity::generate().unwrap().0),
+            name: "Phone".into(),
+            epoch: [4; 16],
+            history: history.clone(),
+            peers: peers.clone(),
+            results: Arc::new(Mutex::new(BTreeMap::new())),
+            routes: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
+            stop: receiver,
+        };
         let session = tokio::spawn(async move {
-            mobile_session(
-                &mut phone, source, epoch, generation, cache, directory, receiver,
-            )
-            .await
+            mobile_session(&mut phone, source, epoch, generation, &context, commands).await
         });
         assert!(matches!(
             timeout(Duration::from_secs(1), read_frame(&mut desktop))
@@ -459,5 +740,77 @@ mod tests {
         );
         stop.send(true).unwrap();
         assert!(session.await.unwrap().is_ok());
+        drop(command_sender);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn explicit_offer_requires_send_consent_and_applied_reply() {
+        let (identity, _) = Identity::generate().unwrap();
+        let source = [2; 32];
+        let epoch = [4; 16];
+        let event = EventId {
+            origin: identity.id,
+            epoch,
+            seq: 1,
+        };
+        let bytes: Arc<[u8]> = Arc::from(&b"manual copy"[..]);
+        let command = SendCommand {
+            event,
+            target: source,
+            metadata: Metadata {
+                format: Format::Text,
+                size: bytes.len() as u64,
+                digest: Sha256::digest(&bytes).into(),
+            },
+            body: bytes.clone(),
+        };
+        let peers = Arc::new(Mutex::new(PeerDirectory::new(identity.id)));
+        peers
+            .lock()
+            .unwrap()
+            .observed_direct(
+                source,
+                "Desktop".into(),
+                "100.100.100.2:45987".into(),
+                Capabilities::desktop(),
+            )
+            .unwrap();
+        let (_, stop) = watch::channel(false);
+        let context = SessionContext {
+            identity: Arc::new(identity),
+            name: "Phone".into(),
+            epoch,
+            history: Arc::new(Mutex::new(MobileHistory::default())),
+            peers: peers.clone(),
+            results: Arc::new(Mutex::new(BTreeMap::new())),
+            routes: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
+            stop,
+        };
+        let (mut phone, mut desktop) = tokio::io::duplex(1024);
+        assert_eq!(
+            send_offer(&mut phone, &command, &context).await.unwrap(),
+            SendState::Failed
+        );
+        peers
+            .lock()
+            .unwrap()
+            .directions(
+                source,
+                crate::peers::Directions {
+                    send: true,
+                    receive: true,
+                },
+            )
+            .unwrap();
+        let task = tokio::spawn(async move { send_offer(&mut phone, &command, &context).await });
+        assert!(
+            matches!(read_frame(&mut desktop).await.unwrap(), FrameV2::Offer { event: offered, .. } if offered == event)
+        );
+        write_frame(&mut desktop, &FrameV2::Ready).await.unwrap();
+        let mut body = vec![0; bytes.len()];
+        desktop.read_exact(&mut body).await.unwrap();
+        assert_eq!(body, &*bytes);
+        write_frame(&mut desktop, &FrameV2::Applied).await.unwrap();
+        assert_eq!(task.await.unwrap().unwrap(), SendState::Applied);
     }
 }

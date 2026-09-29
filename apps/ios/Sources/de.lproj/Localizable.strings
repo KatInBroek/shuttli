@@ -37,3 +37,12 @@
 "clear" = "Löschen";
 "cancel" = "Abbrechen";
 "clear_history_help" = "Dies löscht den Cache auf diesem Telefon. Erlaubte Computer können gespeicherte Kopien bei der nächsten Aktualisierung erneut liefern.";
+"send_to_device" = "Senden an dieses Gerät erlauben";
+"sent_from_phone" = "Von diesem Telefon gesendet";
+"send_queued" = "Sende an erlaubte Geräte";
+"no_send_targets" = "Zuerst das Senden an mindestens ein verbundenes Gerät erlauben";
+"transfer_queued" = "In Warteschlange";
+"transfer_sending" = "Wird gesendet";
+"transfer_applied" = "Auf Gerät angewendet";
+"transfer_failed" = "Fehlgeschlagen";
+"transfer_unknown" = "Ergebnis unbekannt";

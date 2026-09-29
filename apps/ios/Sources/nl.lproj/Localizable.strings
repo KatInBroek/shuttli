@@ -37,3 +37,12 @@
 "clear" = "Wissen";
 "cancel" = "Annuleren";
 "clear_history_help" = "Dit wist de cache op deze telefoon. Toegestane computers kunnen bewaarde kopieën bij de volgende verversing opnieuw aanbieden.";
+"send_to_device" = "Verzenden naar dit apparaat toestaan";
+"sent_from_phone" = "Verzonden vanaf deze telefoon";
+"send_queued" = "Verzenden naar toegestane apparaten";
+"no_send_targets" = "Sta eerst verzenden naar minstens één verbonden apparaat toe";
+"transfer_queued" = "In wachtrij";
+"transfer_sending" = "Bezig met verzenden";
+"transfer_applied" = "Toegepast op apparaat";
+"transfer_failed" = "Mislukt";
+"transfer_unknown" = "Resultaat onbekend";
