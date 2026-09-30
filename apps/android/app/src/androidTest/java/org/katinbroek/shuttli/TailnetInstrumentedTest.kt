@@ -32,6 +32,7 @@ class TailnetInstrumentedTest {
         val args = InstrumentationRegistry.getArguments()
         val peerId = args.getString("tailnetPeer") ?: ""
         val token = args.getString("tailnetToken") ?: ""
+        val liveOnly = args.getString("tailnetLiveOnly") == "true"
         assumeTrue(peerId.matches(Regex("[0-9a-f]{64}")) && token.matches(Regex("[a-z0-9]{8,32}")))
         val activity = rule.activity
         val state = (activity.application as ShuttliApplication).mobileState
@@ -105,6 +106,7 @@ class TailnetInstrumentedTest {
         assertTrue(state.snapshot.transfers.isEmpty())
         rule.onNodeWithText(activity.getString(R.string.send_to_devices)).performClick()
         await { state.snapshot.transfers.any { it.state == MobileTransferState.APPLIED } }
+        await { state.snapshot.actionStatus == "transfer_applied" }
         checkpoint("phone-text-applied")
 
         val bitmap = Bitmap.createBitmap(3, 2, Bitmap.Config.ARGB_8888)
@@ -121,7 +123,22 @@ class TailnetInstrumentedTest {
         val previousTransfers = state.snapshot.transfers.map { it.eventKey }.toSet()
         rule.onNodeWithText(activity.getString(R.string.send_to_devices)).performClick()
         await { state.snapshot.transfers.any { it.eventKey !in previousTransfers && it.state == MobileTransferState.APPLIED } }
+        await { state.snapshot.actionStatus == "transfer_applied" }
         checkpoint("phone-image-applied")
+
+        if (liveOnly) {
+            checkpoint("desktop-image")
+            await { state.snapshot.history.any { !it.isLocal && it.kind == MobileContentKind.IMAGE && it.available } }
+            val row = state.snapshot.history.first { !it.isLocal && it.kind == MobileContentKind.IMAGE && it.available }
+            state.selectHistory(row)
+            await { state.snapshot.preview != null && state.snapshot.selected?.eventKey == row.eventKey }
+            Log.i("ShuttliTailnetTest", "DESKTOP_PNG_SHA256=" + MessageDigest.getInstance("SHA-256").digest(state.snapshot.preview!!)
+                .joinToString("") { "%02x".format(it) })
+            checkpoint("live-only-complete")
+            state.setDirections(state.snapshot.devices.first { it.id == peerId }, send = false, receive = true)
+            Log.i("ShuttliTailnetTest", "TAILNET_ACCEPTANCE=PASS")
+            return
+        }
 
         rule.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
         await { state.snapshot.connected == 0u && state.snapshot.draft == null }

@@ -154,5 +154,6 @@
   "status.permissions_hint": "Offline-Geräte zählen mit. Eine Richtung ist nur erlaubt, wenn sowohl der globale als auch der Geräteschalter eingeschaltet ist. Dies sind lokale Berechtigungen; die Übertragung hängt auch vom anderen Gerät ab.",
   "ui.app_version": "App-Version",
   "devices.history_pull": "Empfängt über den Verlauf, solange die App geöffnet ist",
-  "result.history_pull": "Keine direkte Übertragung gestartet; erlaubte Geräte rufen den gespeicherten Verlauf ab"
+  "result.history_pull": "Keine direkte Übertragung gestartet; erlaubte Geräte rufen den gespeicherten Verlauf ab",
+  "notice.receiver_confirmed": "Das Gerät hat den Empfang bestätigt"
 }

@@ -104,4 +104,5 @@
     <string name="content_types_help">Choisissez les types à envoyer et récupérer. Les métadonnées et les copies déjà reçues restent dans l’historique.</string>
     <string name="language">Langue</string>
     <string name="system_language">Langue du système</string>
+    <string name="send_partial">Certains appareils n’ont pas confirmé ; vérifiez leur état</string>
 </resources>

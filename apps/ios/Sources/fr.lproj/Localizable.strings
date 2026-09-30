@@ -104,3 +104,4 @@
 "language" = "Langue";
 "system_language" = "Langue du système";
 "unsupported_text" = "Texte trop grand ou non pris en charge";
+"send_partial" = "Certains appareils n’ont pas confirmé ; vérifiez leur état";

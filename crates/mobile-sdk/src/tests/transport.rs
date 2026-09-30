@@ -178,7 +178,7 @@ async fn foreground_session_fetches_into_app_cache_without_os_copy() {
             source,
             "Desktop".into(),
             "100.100.100.2:45987".into(),
-            Capabilities::desktop(),
+            Capabilities::pull_only(),
         )
         .unwrap();
     let (stop, receiver) = watch::channel(false);
@@ -601,6 +601,7 @@ async fn explicit_offer_requires_send_consent_and_applied_reply() {
         stop,
         refresh: watch::channel(0).1,
     };
+    context.history.lock().unwrap().enter_foreground();
     let (mut phone, mut desktop) = tokio::io::duplex(1024);
     assert_eq!(
         send_offer(&mut phone, &command, &context).await.unwrap(),
@@ -655,4 +656,383 @@ async fn explicit_offer_requires_send_consent_and_applied_reply() {
     assert_eq!(body, &*bytes);
     write_frame(&mut desktop, &FrameV2::Applied).await.unwrap();
     assert_eq!(task.await.unwrap().unwrap(), SendState::Applied);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn live_and_pull_interleave_in_both_identity_orders_without_forwarding_or_duplicate_fetch() {
+    for source in [[0; 32], [255; 32]] {
+        let identity = Identity::generate().unwrap().0;
+        let own = identity.id;
+        let desktop_leads = source < own;
+        let history = Arc::new(Mutex::new(MobileHistory::default()));
+        let generation = history.lock().unwrap().enter_foreground();
+        let peers = Arc::new(Mutex::new(PeerDirectory::new(own)));
+        peers
+            .lock()
+            .unwrap()
+            .observed_direct(
+                source,
+                "Peer".into(),
+                "100.64.0.2:45987".into(),
+                Capabilities::live(),
+            )
+            .unwrap();
+        peers
+            .lock()
+            .unwrap()
+            .directions(
+                source,
+                crate::peers::Directions {
+                    send: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let (stop, stop_rx) = watch::channel(false);
+        let (refresh, refresh_rx) = watch::channel(0);
+        let context = SessionContext {
+            identity: Arc::new(identity),
+            name: "Peer".into(),
+            epoch: [4; 16],
+            history: history.clone(),
+            peers,
+            results: Arc::new(Mutex::new(BTreeMap::new())),
+            routes: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
+            stop: stop_rx,
+            refresh: refresh_rx,
+        };
+        let epoch = [3; 16];
+        let (sender, commands) = mpsc::channel(8);
+        let (mut local, mut remote) = tokio::io::duplex(4096);
+        let running = context.clone();
+        let session = tokio::spawn(async move {
+            mobile_session(&mut local, source, epoch, generation, &running, commands).await
+        });
+        if desktop_leads {
+            write_frame(&mut remote, &FrameV2::Poll).await.unwrap();
+        }
+        assert!(matches!(
+            read_frame(&mut remote).await.unwrap(),
+            FrameV2::HistoryListRequest { .. }
+        ));
+        write_frame(
+            &mut remote,
+            &FrameV2::HistoryListResponse {
+                source_epoch: epoch,
+                revision: 1,
+                items: vec![],
+                next: None,
+            },
+        )
+        .await
+        .unwrap();
+        if !desktop_leads {
+            assert!(matches!(
+                read_frame(&mut remote).await.unwrap(),
+                FrameV2::Poll
+            ));
+        }
+        let event = EventId {
+            origin: source,
+            epoch,
+            seq: 1,
+        };
+        let body = b"live remote copy";
+        let meta = Metadata {
+            format: Format::Text,
+            size: body.len() as u64,
+            digest: shuttli_content::canonical_digest(Format::Text, body).unwrap(),
+        };
+        write_frame(
+            &mut remote,
+            &FrameV2::Offer {
+                event,
+                meta: meta.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            read_frame(&mut remote).await.unwrap(),
+            FrameV2::Ready
+        ));
+        remote.write_all(body).await.unwrap();
+        assert!(matches!(
+            read_frame(&mut remote).await.unwrap(),
+            FrameV2::Applied
+        ));
+        assert_eq!(
+            &*history
+                .lock()
+                .unwrap()
+                .body_for_explicit_copy(event)
+                .unwrap(),
+            body
+        );
+        assert!(
+            context.results.lock().unwrap().is_empty(),
+            "reception cannot publish or forward"
+        );
+        let outgoing = EventId {
+            origin: own,
+            epoch: context.epoch,
+            seq: 1,
+        };
+        let bytes: Arc<[u8]> = Arc::from(&b"explicit local send"[..]);
+        sender
+            .send(SendCommand {
+                event: outgoing,
+                target: source,
+                metadata: Metadata {
+                    format: Format::Text,
+                    size: bytes.len() as u64,
+                    digest: shuttli_content::canonical_digest(Format::Text, &bytes).unwrap(),
+                },
+                body: bytes.clone(),
+            })
+            .await
+            .unwrap();
+        refresh.send_modify(|r| *r += 1);
+        let mut sent = false;
+        let mut listed = false;
+        for _ in 0..12 {
+            if desktop_leads {
+                write_frame(&mut remote, &FrameV2::Poll).await.unwrap();
+            }
+            match timeout(Duration::from_secs(2), read_frame(&mut remote))
+                .await
+                .unwrap()
+                .unwrap()
+            {
+                FrameV2::Poll => {
+                    write_frame(&mut remote, &FrameV2::Idle).await.unwrap();
+                }
+                FrameV2::Idle => {}
+                FrameV2::HistoryListRequest { .. } => {
+                    write_frame(
+                        &mut remote,
+                        &FrameV2::HistoryListResponse {
+                            source_epoch: epoch,
+                            revision: 2,
+                            items: vec![HistorySummary {
+                                event,
+                                metadata: meta.clone(),
+                                copied_at_ms: 100,
+                                body_available: true,
+                            }],
+                            next: None,
+                        },
+                    )
+                    .await
+                    .unwrap();
+                    listed = true;
+                }
+                FrameV2::Offer { event: offered, .. } => {
+                    assert_eq!(offered, outgoing);
+                    write_frame(&mut remote, &FrameV2::HistoryChanged { revision: 2 })
+                        .await
+                        .unwrap();
+                    write_frame(&mut remote, &FrameV2::Ready).await.unwrap();
+                    let mut received = vec![0; bytes.len()];
+                    remote.read_exact(&mut received).await.unwrap();
+                    assert_eq!(received, &*bytes);
+                    write_frame(&mut remote, &FrameV2::HistoryChanged { revision: 3 })
+                        .await
+                        .unwrap();
+                    write_frame(&mut remote, &FrameV2::Applied).await.unwrap();
+                    sent = true;
+                }
+                FrameV2::HistoryGet { .. } => {
+                    panic!("verified live body must not be fetched twice")
+                }
+                other => panic!("unexpected frame {other:?}"),
+            }
+            if sent && listed {
+                break;
+            }
+        }
+        assert!(sent && listed);
+        timeout(Duration::from_secs(1), async {
+            while context.results.lock().unwrap().get(&(outgoing, source))
+                != Some(&SendState::Applied)
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(history.lock().unwrap().timeline().len(), 1);
+        stop.send(true).unwrap();
+        assert!(session.await.unwrap().is_ok());
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn original_v1_tls_peer_can_send_and_receive_with_app_cache_adapter() {
+    let phone = Identity::generate().unwrap().0;
+    let remote_identity = Identity::generate().unwrap().0;
+    let source = remote_identity.id;
+    let history = Arc::new(Mutex::new(MobileHistory::default()));
+    history.lock().unwrap().enter_foreground();
+    let (stop, stop_rx) = watch::channel(false);
+    let context = SessionContext {
+        identity: Arc::new(phone),
+        name: "Peer".into(),
+        epoch: [4; 16],
+        history: history.clone(),
+        peers: Arc::new(Mutex::new(PeerDirectory::new([1; 32]))),
+        results: Arc::new(Mutex::new(BTreeMap::new())),
+        routes: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
+        stop: stop_rx,
+        refresh: watch::channel(0).1,
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let running = context.clone();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        accept_desktop(stream, "100.64.0.2:45987".parse().unwrap(), running).await
+    });
+    let mut remote = TlsConnector::from(remote_identity.client.clone())
+        .connect(
+            rustls::pki_types::ServerName::try_from("shuttli.local").unwrap(),
+            TcpStream::connect(address).await.unwrap(),
+        )
+        .await
+        .unwrap();
+    write_hello(
+        &mut remote,
+        &Hello::V1 {
+            name: "Legacy peer".into(),
+            epoch: [3; 16],
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        read_hello(&mut remote).await.unwrap(),
+        Hello::V1 { .. }
+    ));
+    write_live_frame(
+        &mut remote,
+        &FrameV2::Select { initiator: source },
+        WireVersion::V1,
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        read_live_frame(&mut remote, WireVersion::V1).await.unwrap(),
+        FrameV2::Select { .. }
+    ));
+    let event = EventId {
+        origin: source,
+        epoch: [3; 16],
+        seq: 1,
+    };
+    let bytes = b"v1 live content";
+    let meta = Metadata {
+        format: Format::Text,
+        size: bytes.len() as u64,
+        digest: shuttli_content::canonical_digest(Format::Text, bytes).unwrap(),
+    };
+    assert_eq!(
+        shuttli_transport::send_live_version(
+            &mut remote,
+            shuttli_transport::LiveOffer {
+                event,
+                metadata: &meta,
+                body: bytes
+            },
+            || true,
+            |_| Ok(()),
+            || {},
+            WireVersion::V1
+        )
+        .await
+        .unwrap(),
+        shuttli_transport::SendOutcome::Applied
+    );
+    assert_eq!(
+        &*history
+            .lock()
+            .unwrap()
+            .body_for_explicit_copy(event)
+            .unwrap(),
+        bytes
+    );
+    context
+        .peers
+        .lock()
+        .unwrap()
+        .directions(
+            source,
+            crate::peers::Directions {
+                send: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let own = EventId {
+        origin: context.identity.id,
+        epoch: context.epoch,
+        seq: 1,
+    };
+    let route = context.routes.lock().await.get(&source).cloned().unwrap();
+    route
+        .send(SendCommand {
+            event: own,
+            target: source,
+            metadata: meta.clone(),
+            body: Arc::from(&bytes[..]),
+        })
+        .await
+        .unwrap();
+    write_live_frame(&mut remote, &FrameV2::Poll, WireVersion::V1)
+        .await
+        .unwrap();
+    assert!(
+        matches!(read_live_frame(&mut remote, WireVersion::V1).await.unwrap(), FrameV2::Offer { event: offered, .. } if offered == own)
+    );
+    write_live_frame(&mut remote, &FrameV2::Ready, WireVersion::V1)
+        .await
+        .unwrap();
+    assert_eq!(
+        shuttli_transport::receive_body(&mut remote, &meta, || true)
+            .await
+            .unwrap(),
+        bytes
+    );
+    write_live_frame(&mut remote, &FrameV2::Applied, WireVersion::V1)
+        .await
+        .unwrap();
+    timeout(Duration::from_secs(1), async {
+        while context.results.lock().unwrap().get(&(own, source)) != Some(&SendState::Applied) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    write_live_frame(&mut remote, &FrameV2::Status { event }, WireVersion::V1)
+        .await
+        .unwrap();
+    assert!(matches!(
+        read_live_frame(&mut remote, WireVersion::V1).await.unwrap(),
+        FrameV2::Receipt {
+            state: Some(shuttli_model::sync::DeliveryState::Applied),
+            ..
+        }
+    ));
+    history.lock().unwrap().clear();
+    write_live_frame(&mut remote, &FrameV2::Status { event }, WireVersion::V1)
+        .await
+        .unwrap();
+    assert!(matches!(
+        read_live_frame(&mut remote, WireVersion::V1).await.unwrap(),
+        FrameV2::Receipt {
+            state: Some(shuttli_model::sync::DeliveryState::Unknown),
+            ..
+        }
+    ));
+    stop.send(true).unwrap();
+    assert!(server.await.unwrap().is_ok());
 }

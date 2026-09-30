@@ -104,4 +104,5 @@
     <string name="content_types_help">Kies welke typen je verzendt en ophaalt. Metadata en eerder ontvangen kopieën blijven in de geschiedenis.</string>
     <string name="language">Taal</string>
     <string name="system_language">Systeemstandaard</string>
+    <string name="send_partial">Sommige apparaten hebben niet bevestigd; controleer hun status</string>
 </resources>

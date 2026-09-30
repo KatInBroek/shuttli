@@ -45,6 +45,16 @@ final class AppState: ObservableObject {
     @Published private(set) var historyLimit = 20
     private let session = MobileSession()
     private var refreshTask: Task<Void, Never>?
+    private var sendEvents: Set<String> = []
+
+    static func sendStatus(_ states: [MobileTransferState]) -> String {
+        if states.isEmpty { return "transfer_unknown" }
+        if states.contains(.queued) || states.contains(.sending) { return "send_queued" }
+        if states.allSatisfy({ $0 == .applied }) { return "transfer_applied" }
+        if states.contains(.applied) { return "send_partial" }
+        if states.contains(.unknown) { return "transfer_unknown" }
+        return "transfer_failed"
+    }
 
     func enterForeground() {
         refreshTask?.cancel()
@@ -101,6 +111,9 @@ final class AppState: ObservableObject {
         historyCount = UInt32(historyRows.count)
         deviceRows = session.deviceRows()
         transferRows = session.transferRows()
+        if !sendEvents.isEmpty {
+            sendStatusKey = Self.sendStatus(transferRows.filter { sendEvents.contains($0.eventKey) }.map(\.state))
+        }
         connectedPeerCount = session.connectedPeersCount()
         if connectedPeerCount > 0 { connectionStatusKey = "devices_connected" }
     }
@@ -204,9 +217,11 @@ final class AppState: ObservableObject {
         draft = nil
         imageDraft = nil
         sendStatusKey = nil
+        sendEvents = []
     }
 
     func sendDraft() {
+        let previous = Set(session.transferRows().map(\.eventKey))
         let queued: UInt32
         if let imageDraft {
             queued = session.sendImage(pngBytes: imageDraft)
@@ -214,13 +229,16 @@ final class AppState: ObservableObject {
             queued = session.sendText(text: draft)
         } else { return }
         sendStatusKey = queued > 0 ? "send_queued" : "no_send_targets"
+        sendEvents = queued > 0 ? Set(session.transferRows().map(\.eventKey)).subtracting(previous) : []
         if queued > 0 { self.draft = nil; imageDraft = nil }
         updateSnapshot()
     }
 
     func resend(_ row: MobileHistoryRow) {
+        let previous = Set(session.transferRows().map(\.eventKey))
         let queued = session.resendLocal(key: row.eventKey)
         sendStatusKey = queued > 0 ? "send_queued" : "no_send_targets"
+        sendEvents = queued > 0 ? Set(session.transferRows().map(\.eventKey)).subtracting(previous) : []
         updateSnapshot()
     }
 
@@ -239,6 +257,7 @@ final class AppState: ObservableObject {
             sendStatusKey = "unsupported_text"; return
         }
         sendStatusKey = nil
+        sendEvents = []
         draft = text
         imageDraft = nil
     }

@@ -16,7 +16,8 @@
     "shuttli-mobile-ffi": "mobile-ffi",
     "shuttli-protocol": "protocol",
     "shuttli-identity": "identity",
-    "shuttli-content": "content"
+    "shuttli-content": "content",
+    "shuttli-transport": "transport"
   },
   "reachable_layers": {
     "value": [],
@@ -44,7 +45,8 @@
       "ports",
       "protocol",
       "value",
-      "content"
+      "content",
+      "transport"
     ],
     "runtime": [
       "value",
@@ -69,7 +71,8 @@
       "runtime",
       "ui",
       "value",
-      "content"
+      "content",
+      "transport"
     ],
     "test": [
       "adapter",
@@ -83,21 +86,24 @@
       "runtime",
       "ui",
       "value",
-      "content"
+      "content",
+      "transport"
     ],
     "brand": [],
     "mobile-sdk": [
       "identity",
       "protocol",
       "value",
-      "content"
+      "content",
+      "transport"
     ],
     "mobile-ffi": [
       "identity",
       "mobile-sdk",
       "protocol",
       "value",
-      "content"
+      "content",
+      "transport"
     ],
     "protocol": [
       "value"
@@ -107,6 +113,11 @@
     ],
     "content": [
       "value"
+    ],
+    "transport": [
+      "protocol",
+      "value",
+      "content"
     ]
   },
   "external_by_layer": {
@@ -927,6 +938,58 @@
       "version_check",
       "wasi",
       "zlib-rs"
+    ],
+    "transport": [
+      "adler2",
+      "bitflags",
+      "block-buffer",
+      "bytes",
+      "cfg-if",
+      "cpufeatures",
+      "crc32fast",
+      "crypto-common",
+      "digest",
+      "fdeflate",
+      "flate2",
+      "generic-array",
+      "getrandom",
+      "itoa",
+      "libc",
+      "memchr",
+      "miniz_oxide",
+      "mio",
+      "pin-project-lite",
+      "png",
+      "proc-macro2",
+      "quote",
+      "rand_core",
+      "serde",
+      "serde_core",
+      "serde_derive",
+      "serde_json",
+      "sha2",
+      "simd-adler32",
+      "socket2",
+      "syn",
+      "tokio",
+      "tokio-macros",
+      "typenum",
+      "unicode-ident",
+      "version_check",
+      "wasi",
+      "windows-link",
+      "windows-sys",
+      "windows-targets",
+      "windows_aarch64_gnullvm",
+      "windows_aarch64_msvc",
+      "windows_i686_gnu",
+      "windows_i686_gnullvm",
+      "windows_i686_msvc",
+      "windows_x86_64_gnu",
+      "windows_x86_64_gnullvm",
+      "windows_x86_64_msvc",
+      "zlib-rs",
+      "zmij"
     ]
   }
 }

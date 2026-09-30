@@ -49,7 +49,8 @@ internal data class UiSnapshot(
     val historyMode: MobileHistoryMode = MobileHistoryMode.CONTENT,
     val historyLimit: Int = 20,
     val fingerprint: String = "",
-    val actionEvent: String? = null
+    val actionEvent: String? = null,
+    val sendEvents: Set<String> = emptySet()
 )
 
 class MobileAppState(private val app: Application) {
@@ -121,8 +122,14 @@ class MobileAppState(private val app: Application) {
         val devices = session.deviceRows()
         val transfers = session.transferRows()
         val connected = session.connectedPeersCount()
-        post { it.copy(history = history, devices = devices, transfers = transfers,
-            connected = connected, status = if (connected > 0u) "connected" else it.status) }
+        post {
+            val actionStatus = if (it.sendEvents.isNotEmpty() && it.actionStatus in setOf(
+                    "send_queued", "transfer_applied", "transfer_failed", "transfer_unknown", "send_partial")) {
+                sendStatus(transfers.filter { row -> row.eventKey in it.sendEvents }.map { row -> row.state })
+            } else it.actionStatus
+            it.copy(history = history, devices = devices, transfers = transfers, actionStatus = actionStatus,
+                connected = connected, status = if (connected > 0u) "connected" else it.status)
+        }
     }
 
     private suspend fun post(change: (UiSnapshot) -> UiSnapshot) = withContext(Dispatchers.Main) {
@@ -221,12 +228,14 @@ class MobileAppState(private val app: Application) {
             actions.withLock {
             if (!active) return@withLock
             val draft = snapshot.draft ?: return@withLock
+            val previous = session.transferRows().map { it.eventKey }.toSet()
             val count = when (draft) {
                 is Draft.Text -> session.sendText(draft.value)
                 is Draft.Image -> session.sendImage(draft.png)
             }
             post { it.copy(draft = if (count > 0u) null else it.draft,
-                actionStatus = if (count > 0u) "send_queued" else "no_send_targets") }
+                actionStatus = if (count > 0u) "send_queued" else "no_send_targets",
+                sendEvents = if (count > 0u) session.transferRows().map { row -> row.eventKey }.toSet() - previous else emptySet()) }
             refresh()
             }
         }
@@ -235,10 +244,14 @@ class MobileAppState(private val app: Application) {
     fun resend(row: MobileHistoryRow) {
         if (!row.isLocal) return
         scope.launch {
-            if (!active) return@launch
+            actions.withLock {
+            if (!active) return@withLock
+            val previous = session.transferRows().map { it.eventKey }.toSet()
             val count = session.resendLocal(row.eventKey)
-            post { it.copy(actionStatus = if (count > 0u) "send_queued" else "no_send_targets") }
+            post { it.copy(actionStatus = if (count > 0u) "send_queued" else "no_send_targets",
+                sendEvents = if (count > 0u) session.transferRows().map { row -> row.eventKey }.toSet() - previous else emptySet()) }
             refresh()
+            }
         }
     }
 

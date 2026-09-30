@@ -248,7 +248,7 @@ impl Service {
             let target = format_id(permit.target());
             let peer = target.clone();
             let p = payload.clone();
-            let detail = format!("{reason}; awaiting remote OS readback");
+            let detail = format!("{reason}; awaiting receiver confirmation");
             self.store
                 .call(move |s| s.record(event, &peer, "send", DeliveryState::Sending, &p, &detail))
                 .await?;

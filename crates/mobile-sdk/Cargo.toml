@@ -17,6 +17,7 @@ workspace = true
 shuttli-content.workspace = true
 shuttli-model.workspace = true
 shuttli-protocol = { path = "../protocol" }
+shuttli-transport.workspace = true
 shuttli-identity.workspace = true
 tokio.workspace = true
 tokio-rustls.workspace = true

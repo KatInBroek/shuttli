@@ -104,4 +104,5 @@
     <string name="content_types_help">Wähle die zu sendenden und abzurufenden Typen. Metadaten und zuvor empfangene Kopien bleiben im Verlauf.</string>
     <string name="language">Sprache</string>
     <string name="system_language">Systemstandard</string>
+    <string name="send_partial">Einige Geräte haben nicht bestätigt; prüfen Sie ihren Status</string>
 </resources>

@@ -1028,6 +1028,7 @@ dependencies = [
  "shuttli-model",
  "shuttli-ports",
  "shuttli-protocol",
+ "shuttli-transport",
  "tokio",
  "tokio-rustls",
  "x11rb",
@@ -1148,6 +1149,7 @@ dependencies = [
  "shuttli-identity",
  "shuttli-model",
  "shuttli-protocol",
+ "shuttli-transport",
  "tokio",
  "tokio-rustls",
  "zeroize",
@@ -1190,6 +1192,17 @@ name = "shuttli-runtime"
 version = "0.1.1"
 dependencies = [
  "shuttli-ports",
+]
+
+[[package]]
+name = "shuttli-transport"
+version = "0.1.1"
+dependencies = [
+ "serde_json",
+ "shuttli-content",
+ "shuttli-model",
+ "shuttli-protocol",
+ "tokio",
 ]
 
 [[package]]

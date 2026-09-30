@@ -1,4 +1,4 @@
-//! Wire v2 mobile values. All data here is untrusted until a peer is
+//! Shared discovery and history extension values. All data here is untrusted until a peer is
 //! authenticated and current core policy authorizes the operation.
 extern crate alloc;
 use alloc::{string::String, vec::Vec};
@@ -28,6 +28,11 @@ impl Capabilities {
         }
     }
     pub const fn desktop() -> Self {
+        Self::live()
+    }
+    /// Live delivery and history queries are independent operations. This
+    /// capability has no platform or clipboard-write implication.
+    pub const fn live() -> Self {
         Self {
             accept_live_offer: true,
             ..Self::pull_only()

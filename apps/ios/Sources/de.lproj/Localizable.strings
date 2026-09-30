@@ -104,3 +104,4 @@
 "language" = "Sprache";
 "system_language" = "Systemstandard";
 "unsupported_text" = "Text zu groß oder nicht unterstützt";
+"send_partial" = "Einige Geräte haben nicht bestätigt; prüfen Sie ihren Status";

@@ -340,6 +340,69 @@ impl MobileHistory {
             }
         }
     }
+    /// The native reception target is this bounded app cache. This does not
+    /// write an OS clipboard, publish a new event, or manufacture a list revision.
+    pub fn receive_live(
+        &mut self,
+        generation: u64,
+        source: DeviceId,
+        event: EventId,
+        metadata: shuttli_model::sync::Metadata,
+        bytes: Vec<u8>,
+        received_at_ms: u64,
+    ) -> Result<(), HistoryError> {
+        if !self.active || generation != self.generation {
+            return Err(HistoryError::Background);
+        }
+        if !self.wants_body() {
+            return Err(HistoryError::Disabled);
+        }
+        if event.origin != source
+            || event.seq == 0
+            || !shuttli_transport::valid_metadata(&metadata)
+            || metadata.size != bytes.len() as u64
+            || shuttli_content::canonical_digest(metadata.format, &bytes).ok()
+                != Some(metadata.digest)
+            || self.rows.get(&event).is_some_and(|row| {
+                row.source != source
+                    || row.summary.metadata.format != metadata.format
+                    || row.summary.metadata.size != metadata.size
+                    || (row.summary.metadata.digest != [0; 32]
+                        && row.summary.metadata.digest != metadata.digest)
+            })
+        {
+            return Err(HistoryError::InvalidBody);
+        }
+        let body = match metadata.format {
+            shuttli_model::sync::Format::Text => CachedBody::Memory(bytes.into()),
+            shuttli_model::sync::Format::Png => match &self.image_cache {
+                Some(cache) => cache.put(&bytes).map_err(|_| HistoryError::InvalidBody)?,
+                None => CachedBody::Memory(bytes.into()),
+            },
+        };
+        let copied_at_ms = self
+            .rows
+            .get(&event)
+            .map_or(received_at_ms, |row| row.summary.copied_at_ms);
+        self.rows.insert(
+            event,
+            TimelineItem {
+                source,
+                summary: HistorySummary {
+                    event,
+                    metadata,
+                    copied_at_ms,
+                    body_available: true,
+                },
+                body: Some(body),
+            },
+        );
+        self.trim();
+        if !self.body_available(event) {
+            return Err(HistoryError::Missing);
+        }
+        Ok(())
+    }
     pub fn body_available(&self, event: EventId) -> bool {
         self.rows.get(&event).is_some_and(|row| match &row.body {
             Some(CachedBody::Memory(_)) => true,

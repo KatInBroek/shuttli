@@ -106,6 +106,8 @@ def main():
     collector = threading.Thread(target=collect, daemon=True)
     collector.start()
     options = ["-e", "tailnetPeer", desktop_id, "-e", "tailnetToken", token]
+    if config.get("live_only"):
+        options += ["-e", "tailnetLiveOnly", "true"]
     if second:
         options += ["-e", "tailnetSecondPeer", second["id"]]
     process = None
@@ -139,9 +141,14 @@ def main():
                     fixture("desktop tailnet text " + token)
                 elif step == "desktop-incremental":
                     write_clipboard(("desktop incremental text " + token).encode())
-                    rows = command("history")["entries"]
-                    assert not any(row["direction"] == "send" and row["peer"] == phone_id
-                                   for row in rows), "Pull-only history must not create live delivery rows"
+                    delivery_deadline = time.monotonic() + 15
+                    while True:
+                        rows = command("history")["entries"]
+                        if any(row["direction"] == "send" and row["peer"] == phone_id
+                               and row["state"] == "applied" for row in rows):
+                            break
+                        assert time.monotonic() < delivery_deadline, "Live reception was not confirmed"
+                        time.sleep(0.2)
                 elif step == "phone-text-applied":
                     assert read_clipboard("UTF8_STRING") == ("phone tailnet text " + token).encode()
                 elif step == "phone-image-applied":
@@ -170,6 +177,11 @@ def main():
                     assert second, "Second source configuration missing"
                     subprocess.run(second["prepare_command"], check=True, timeout=30,
                                    env=dict(env, SHUTTLI_TEST_TOKEN=token))
+                elif step == "live-only-complete":
+                    assert config.get("live_only"), "Live-only completion in full history test"
+                    rows = command("history")["entries"]
+                    assert any(row["direction"] == "send" and row["peer"] == phone_id
+                               and row["format"] == "png" and row["state"] == "applied" for row in rows)
                 elif step not in ("receive-reenabled", "multiple-sources-merged"):
                     raise AssertionError("Unknown checkpoint: " + step)
                 # Only the separately installed test APK uses this private acknowledgement file.

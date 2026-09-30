@@ -104,3 +104,4 @@
 "language" = "Taal";
 "system_language" = "Systeemstandaard";
 "unsupported_text" = "Tekst te groot of niet ondersteund";
+"send_partial" = "Sommige apparaten hebben niet bevestigd; controleer hun status";

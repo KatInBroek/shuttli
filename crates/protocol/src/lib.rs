@@ -12,6 +12,33 @@ use std::{
 
 pub const MAX_CONTROL_FRAME_BYTES: usize = 16_384;
 
+/// The original live protocol, independent of the receiving platform.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum FrameV1 {
+    Offer {
+        event: EventId,
+        meta: Metadata,
+    },
+    Ready,
+    Applied,
+    Error {
+        message: String,
+    },
+    Select {
+        initiator: DeviceId,
+    },
+    Status {
+        event: EventId,
+    },
+    Receipt {
+        event: EventId,
+        state: Option<shuttli_model::sync::DeliveryState>,
+    },
+    Poll,
+    Idle,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Hello {
     V1 {
@@ -19,6 +46,13 @@ pub enum Hello {
         epoch: [u8; 16],
     },
     V2 {
+        name: String,
+        epoch: [u8; 16],
+        capabilities: Capabilities,
+    },
+    /// Live operations plus history extensions. Version 2 was pull-only;
+    /// version 1 remains the compatibility baseline for live synchronization.
+    V3 {
         name: String,
         epoch: [u8; 16],
         capabilities: Capabilities,
@@ -66,16 +100,24 @@ pub fn decode_hello(bytes: &[u8]) -> Result<Hello, &'static str> {
                 epoch: hello.epoch,
             })
         }
-        Some(2) => {
+        Some(version @ (2 | 3)) => {
             let hello: HelloV2 = serde_json::from_value(value).map_err(|_| "invalid v2 hello")?;
             if hello.kind != "hello" || !valid_name(&hello.name) {
                 return Err("invalid v2 hello");
             }
-            Ok(Hello::V2 {
-                name: hello.name,
-                epoch: hello.epoch,
-                capabilities: hello.capabilities,
-            })
+            if version == 3 {
+                Ok(Hello::V3 {
+                    name: hello.name,
+                    epoch: hello.epoch,
+                    capabilities: hello.capabilities,
+                })
+            } else {
+                Ok(Hello::V2 {
+                    name: hello.name,
+                    epoch: hello.epoch,
+                    capabilities: hello.capabilities,
+                })
+            }
         }
         _ => Err("unsupported hello version"),
     }
@@ -96,6 +138,17 @@ pub fn encode_hello(hello: &Hello) -> Result<Vec<u8>, &'static str> {
         } if valid_name(name) => serde_json::to_vec(&HelloV2 {
             kind: "hello".into(),
             version: 2,
+            name: name.clone(),
+            epoch: *epoch,
+            capabilities: *capabilities,
+        }),
+        Hello::V3 {
+            name,
+            epoch,
+            capabilities,
+        } if valid_name(name) => serde_json::to_vec(&HelloV2 {
+            kind: "hello".into(),
+            version: 3,
             name: name.clone(),
             epoch: *epoch,
             capabilities: *capabilities,
@@ -121,6 +174,15 @@ pub enum FrameV2 {
     },
     Ready,
     Applied,
+    Poll,
+    Idle,
+    Status {
+        event: EventId,
+    },
+    Receipt {
+        event: EventId,
+        state: Option<shuttli_model::sync::DeliveryState>,
+    },
     PeerList {
         revision: u64,
         peers: Vec<shuttli_model::mobile::PeerHint>,
@@ -190,6 +252,19 @@ impl FrameV2 {
             }
             Self::HistoryChanged { revision } if *revision == 0 => Err("invalid revision"),
             Self::HistoryGet { event } if event.seq == 0 => Err("invalid event"),
+            Self::Status { event } | Self::Receipt { event, .. } if event.seq == 0 => {
+                Err("invalid receipt event")
+            }
+            Self::Receipt {
+                state: Some(state), ..
+            } if !matches!(
+                state,
+                shuttli_model::sync::DeliveryState::Applied
+                    | shuttli_model::sync::DeliveryState::Unknown
+            ) =>
+            {
+                Err("invalid receipt state")
+            }
             Self::Offer { event, meta }
                 if event.seq == 0 || meta.size == 0 || meta.size > 8 * 1024 * 1024 =>
             {
@@ -282,6 +357,11 @@ mod tests {
                 name: "phone".into(),
                 epoch: [2; 16],
                 capabilities: Capabilities::pull_only(),
+            },
+            Hello::V3 {
+                name: "peer".into(),
+                epoch: [3; 16],
+                capabilities: Capabilities::live(),
             },
         ] {
             assert_eq!(decode_hello(&encode_hello(&hello).unwrap()).unwrap(), hello);

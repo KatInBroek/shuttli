@@ -10,10 +10,10 @@ Shuttli on iPhone and Android lets a person briefly open the app, see recent ret
 
 | Decision | First-release behavior |
 | --- | --- |
-| Phone directions | No global send/receive switches. For each new peer, phone receive is on and phone send is off; the user may change either per device. Phone receive permits foreground history queries and never writes the OS clipboard. Phone send permits an explicit user-initiated transfer. |
+| Phone directions | No global send/receive switches. For each new peer, phone receive is on and phone send is off; the user may change either per device. Phone receive permits live reception into app history and foreground history queries; it never writes the OS clipboard. Phone send permits an explicit user-initiated transfer. |
 | Computer directions | Existing global and per-device controls remain. A computer sends a phone its device-list hints and answers history queries only when its effective outgoing permission to that phone is on. A new peer is not allowed to receive from a computer until its user enables sending under the existing consent flow. |
 | Clipboard actions | Opening, resuming, discovery, history refresh and preview never read or write the phone clipboard. Import, send, and copy to the phone clipboard require separate user actions. |
-| Network behavior | Each eligible computer independently supplies device hints. The phone directly queries each permitted history source. Computers send no unsolicited clipboard body to a pull-only phone. No single computer coordinates the others. |
+| Network behavior | Each eligible computer independently supplies device hints. The phone directly queries each permitted history source. Online permitted devices use the ordinary live OFFER/READY/body/APPLIED exchange. History pull additionally catches up retained copies after absence. No single computer coordinates the others. |
 | Platform distinction | Negotiate operations such as `peer_hints`, `history_pull`, and `accept_live_offer`; no mobile/desktop device-type flag controls trust or delivery. |
 
 One shared Rust SDK, independent native iOS and Android apps, and desktop protocol changes deliver this feature. Each platform has its own release and real-device acceptance gate.
@@ -83,16 +83,17 @@ history-change hint prompts a query; metadata is merged by event identity and
 only missing eligible bodies are retrieved. This updates app history without
 changing the phone clipboard. Current transport rechecks the bounded recent
 metadata window rather than requesting a strict revision delta. A fifteen-second
-foreground reconciliation provides recovery from missed hints. These mechanics
-are distinct from live desktop clipboard publication.
+foreground reconciliation provides recovery from missed hints. They supplement the ordinary live publication path on every platform.
 
 The implementation separates history reception from live clipboard delivery:
 
-- Desktop publication filters negotiated pull-only peers before queueing or
-  recording a live transfer. Local-origin copies remain in retained history for
-  current-policy queries, including explicit sends; compatible desktop peers
-  still receive ordinary live transfers. A pull-only peer does not produce a
-  synthetic cancellation.
+- Live sending and reception apply to every permitted online peer, including a
+  foreground phone. The shared transport contains no OS or device-kind branch.
+  A native reception adapter commits verified content to the desktop clipboard
+  or the mobile app cache before APPLIED. Only explicit mobile Copy writes its
+  OS clipboard. Retained history queries additionally fill missed events and
+  merge with live events by the same event identity. A peer explicitly choosing
+  pull-only operation remains supported without synthetic live cancellations.
 - Shared SDK snapshots expose per-source metadata/body activity, last metadata
   check, incomplete results and the particular body currently being received.
   Native bindings expose these facts independently of connection status and
@@ -121,7 +122,13 @@ active history work; a later foreground session reconciles retained history and
 does not replay a phone send. Keep cached availability separate from remote
 freshness and current permission.
 
-The computer currently has no history-body acknowledgement proving that the phone
+Live APPLIED confirms the receiving adapter committed the content: a desktop
+performs OS readback and its existing durable receipt; a mobile app validates and
+accepts its bounded cache. Mobile confirmation is session-scoped and does not
+claim an OS write or persistence after app restart. Eviction or clearing makes a
+later receipt query Unknown. Never infer live success from a history response.
+
+The computer has no history-body acknowledgement proving that the phone
 validated and cached its response. Writing bytes to the connection cannot be
 presented as confirmed mobile reception. If the computer must display that
 confirmation, add a separately negotiated, bounded history-content
@@ -135,7 +142,10 @@ Acceptance must exercise metadata-before-body, already cached bodies, status-onl
 history, a hint during an in-flight request, a source denying a body after listing,
 one failing source alongside a successful source, background interruption and
 mixed live/pull-only destinations. No case may show false cancellation, false
-body success or a silent phone clipboard write.
+body success, a permanently Sending banner after terminal results, or a silent
+phone clipboard write. Verify text/image exchanges with an unchanged v1 peer,
+concurrent live sends and history requests, notices between READY/APPLIED,
+reconnection, duplicates, permission revocation and mixed per-target results.
 
 ## Kernel and lower-layer change map
 
@@ -147,27 +157,27 @@ The desktop baseline already has `EventId`, per-device/global policy, mutual TLS
 | `core` | Existing publication and write permits, policy revision, no-forwarding rules. | Add a history-export decision using the authenticated requester, current global/per-peer send and type policy, source origin and history mode. Authorize peer-list disclosure separately under the same effective outgoing permission. Preserve desktop clipboard reception; pull-only peers do not enter that path. Explicit phone copy needs a fresh policy-aware local write permit and must not produce an outgoing publication. No copy-time recipient snapshot or offline eligibility permit. | MOB-01–05, MOB-09 |
 | `application` and `ports` | Serial core decisions, pluggable network/store/clipboard ports and configuration generation. | Add frozen import draft, SendDraft, CopyToPhone, per-source catch-up and merge use cases. Add typed network events and store queries for event-ID history and revisions. Filter unsolicited publications by negotiated `accept_live_offer` before queueing, without checking whether a peer is a phone. Recheck authority after async yields, especially between history list and body transfer. | MOB-02–09 |
 | `recent` history and durable store | RAM-only text, encrypted session image objects, retention quotas, persistent identity/policy/replay/receipts. | Index retained local events by `EventId` rather than exposing local numeric history IDs on the wire. Return metadata pages and exact retained bodies only after current policy checks; advance a bounded source revision on local history changes, clear and eviction. No per-target eligibility metadata, mobile inbox receipt, or new history archive is stored. Keep existing durable receipts for explicit phone-to-desktop sends. | MOB-04–08, MOB-10–12 |
-| wire and network adapter | TLS 1.3 identity, one application port, bounded frames, session selection, Poll/Idle loop and payload integrity checks. | Negotiate v2 operation capabilities before parsing new messages. Add bounded `PEER_LIST`, `HISTORY_LIST`, `HISTORY_GET` and `HISTORY_CHANGED` handling on the existing session. A peer without `accept_live_offer` receives no unsolicited `OFFER`; history GET replies are request/response data, not delivery receipts. Keep v1 desktop interoperation and reject unsupported history capabilities clearly. | MOB-01–08, MOB-14 |
+| wire and network adapter | TLS 1.3 identity, one application port, bounded frames, session selection, Poll/Idle loop and payload integrity checks. | Negotiate history operation capabilities before parsing new messages. Add bounded `PEER_LIST`, `HISTORY_LIST`, `HISTORY_GET` and `HISTORY_CHANGED` handling on the existing session. A peer without `accept_live_offer` receives no unsolicited `OFFER`; history GET replies are request/response data, not delivery receipts. Keep v1 interoperation on every platform and reject unsupported history capabilities clearly. | MOB-01–08, MOB-14 |
 | discovery adapter | Desktop Tailscale peer enumeration and authenticated Shuttli sessions. | Export only currently reachable, directly authenticated Shuttli peer hints to each recipient currently allowed by global/per-device send and advertising `peer_hints`; cap count/age and reject self, duplicate or non-Tailscale endpoints. Reuse the existing discovery refresh when a newly connected phone needs a fresher roster, subject to rate limits. The phone may connect to a hinted endpoint, but validates that target's TLS identity before storing it or asking for history. A hint never imports another peer's consent. | MOB-01–03 |
 | mobile SDK and FFI | Shared Rust source and the existing application/core boundaries. | Compile one mobile SDK instance per app; bind typed, bounded commands and subscriptions through UniFFI. Inject platform clipboard, lifecycle, storage and Tailscale route adapters. Cancel foreground tasks and stale callbacks on background/lock; keep image bytes out of repeated UI JSON/base64 snapshots. | MOB-06–14 |
 | native adapters and UI | Shared brand and semantic language catalogs. | iOS uses native paste and clipboard APIs; Android uses focused clipboard import and a restricted image-export provider. Both render merged history and truthful per-source/transfer states through the SDK API only. | MOB-07–13 |
 
-Implementation order: first prove real-device Tailscale routing and compile the shared SDK; then land v2 capability negotiation with pull-only session behavior; then authenticated current-policy history queries over existing retained local events; then peer hints and foreground incremental updates; finally complete the native flows and independent device tests. Keep the v1 desktop path working at each stage.
+Implementation order: first prove real-device Tailscale routing and compile the shared SDK; then retain platform-neutral v1 live interoperability and negotiate live plus history extensions; then authenticated current-policy history queries over existing retained local events; then peer hints and foreground incremental updates; finally complete the native flows and independent device tests. Keep the v1 desktop path working at each stage.
 
-Lower-layer gates before UI acceptance: core tests prove no peer-list disclosure or history export to an unknown/disabled requester and grant retained local history after explicit allowance, regardless of copy-time permission or automatic-send state; authorization tests revoke list and body access even between metadata and `GET`; storage tests prove event-ID lookup, retention/clear and restart gaps without durable text; wire tests reject forged peer hints, wrong identities, stale cursors, oversized pages and v1/v2 confusion; capability tests prove a pull-only peer receives no unsolicited `OFFER` and ordinary desktop peers retain existing delivery; multi-device tests prove every eligible source sends its own roster, the phone merges overlapping hints, one source's revocation does not suppress another, and no hint is relayed as direct knowledge. Core production function, line and region coverage must each remain above 95%.
+Lower-layer gates before UI acceptance: core tests prove no peer-list disclosure or history export to an unknown/disabled requester and grant retained local history after explicit allowance, regardless of copy-time permission or automatic-send state; authorization tests revoke list and body access even between metadata and `GET`; storage tests prove event-ID lookup, retention/clear and restart gaps without durable text; wire tests reject forged peer hints, wrong identities, stale cursors, oversized pages and wire-version confusion; capability tests prove a pull-only peer receives no unsolicited `OFFER` and ordinary desktop peers retain existing delivery; multi-device tests prove every eligible source sends its own roster, the phone merges overlapping hints, one source's revocation does not suppress another, and no hint is relayed as direct knowledge. Core production function, line and region coverage must each remain above 95%.
 
 ## Acceptance scenarios and issue ownership
 
 | Scenario | Required observation | Owner |
 | --- | --- | --- |
 | MOB-T01 | A new phone is discovered by A. With A's outgoing permission off, the phone sees A after authentication but gets no roster or history. Enabling A-to-phone sending immediately provides A's bounded roster and permits current-policy queries; the phone's receive-on default alone never overrides A. | #50, #51, #52 |
-| MOB-T02 | A and B make copies while the phone is closed, including before it was authorized or while automatic sending was off. After each source currently allows sending, the phone queries both and shows retained copies in one history; repeated results collapse by event ID and identical separate copies remain separate. Neither computer pushes a body to the phone. | #50, #51, #52 |
+| MOB-T02 | A and B make copies while the phone is closed, including before it was authorized or while automatic sending was off. After each source currently allows sending, the phone queries both and shows retained copies in one history; repeated results collapse by event ID and identical separate copies remain separate. Offline recovery uses requested bodies; while online the ordinary live path is also available. | #50, #51, #52 |
 | MOB-T03 | During an open session, new retained local copies update the list incrementally for an allowed phone; rapid hints coalesce, reconnect reconciles missed changes, and background entry stops traffic. | #50, #51, #52 |
 | MOB-T04 | Current permission denial, revocation, history-Off, eviction, and offline-source cases never expose bodies while denied or claim a complete history. Granting permission can reveal earlier retained copies, as stated in device settings. | #50, #51, #52 |
 | MOB-T05 | Opening, listing, caching, and previewing do not change the phone OS clipboard or send its contents; explicit Copy and explicit Paste then Send work in real third-party apps. No global mobile direction switch is exposed. | #51, #52 |
 | MOB-T06 | Text/image limits, old wire versions, lost receipts, duplicate events, three-node no-forwarding, cache clear, restart, and resource measurements produce truthful bounded results. | #50, #51, #52 |
 | MOB-T07 | A and B both have permitted direct phone sessions and each sends its own roster. Overlapping hints for C collapse by public-key identity, with both hint sources and expiry retained. Revoking A stops A's updates without stopping B's; C is shown as trusted and queried only after its own direct authentication and C-to-phone permission. Hint-only peers are never re-advertised. | #50, #51, #52 |
-| MOB-T08 | A peer advertising `peer_hints` and `history_pull` but not `accept_live_offer` gets rosters and queried history, no unsolicited clipboard body. A normal desktop peer retains live offers. Session initiator and OS kind never change these rules. | #50, #51, #52 |
+| MOB-T08 | A peer advertising `peer_hints` and `history_pull` but not `accept_live_offer` gets rosters and queried history, no unsolicited clipboard body. An online mobile peer accepts the same live offers into its app cache; a v1-only peer can exchange text/images with it without history extensions. Session initiator and OS kind never change these rules. | #50, #51, #52 |
 
 Issue [#50](https://github.com/KatInBroek/shuttli/issues/50) owns shared core/SDK/protocol and desktop changes. [#51](https://github.com/KatInBroek/shuttli/issues/51) and [#52](https://github.com/KatInBroek/shuttli/issues/52) own independent native apps and real-device acceptance. Simulator or core-only results do not complete a platform issue. Keep machine-specific test evidence outside the repository.
 

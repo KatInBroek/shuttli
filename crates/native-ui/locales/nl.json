@@ -154,5 +154,6 @@
   "status.permissions_hint": "Offline apparaten tellen mee. Een richting is alleen toegestaan als zowel de algemene schakelaar als de apparaatschakelaar aan staat. Dit zijn lokale rechten; overdracht hangt ook af van het andere apparaat.",
   "ui.app_version": "Appversie",
   "devices.history_pull": "Ontvangt via de geschiedenis terwijl de app open is",
-  "result.history_pull": "Geen rechtstreekse overdracht gestart; toegestane apparaten halen de bewaarde geschiedenis op"
+  "result.history_pull": "Geen rechtstreekse overdracht gestart; toegestane apparaten halen de bewaarde geschiedenis op",
+  "notice.receiver_confirmed": "Het apparaat heeft de ontvangst bevestigd"
 }

@@ -4,12 +4,12 @@ use crate::{
     discovery,
     identity::{Identity, device_id},
 };
-use serde::{Deserialize, Serialize};
 use shuttli_core::sync::Publication;
 use shuttli_model::mobile::{Capabilities, PeerHint, PeerList};
 use shuttli_model::sync::*;
 use shuttli_ports::sync::{Network, NetworkEvent, Payload, Result};
 use shuttli_protocol::{FrameV2, Hello, decode_hello, encode_hello};
+use shuttli_transport::{read_frame as read_v2_frame, write_frame as write_v2_frame};
 use std::{
     collections::{HashMap, VecDeque},
     net::{IpAddr, SocketAddr},
@@ -29,31 +29,7 @@ use tokio::{
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 const PORT: u16 = 45987;
 const DEADLINE: Duration = Duration::from_secs(20);
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-enum Frame {
-    Offer {
-        event: EventId,
-        meta: Metadata,
-    },
-    Ready,
-    Applied,
-    Error {
-        message: String,
-    },
-    Select {
-        initiator: DeviceId,
-    },
-    Status {
-        event: EventId,
-    },
-    Receipt {
-        event: EventId,
-        state: Option<DeliveryState>,
-    },
-    Poll,
-    Idle,
-}
+use shuttli_protocol::FrameV1 as Frame;
 async fn write_hello(s: &mut (impl AsyncWrite + Unpin), hello: &Hello) -> Result<()> {
     let bytes = encode_hello(hello).map_err(str::to_owned)?;
     s.write_u32(bytes.len() as u32)
@@ -70,23 +46,6 @@ async fn read_hello(s: &mut (impl AsyncRead + Unpin)) -> Result<Hello> {
     let mut bytes = vec![0; len];
     s.read_exact(&mut bytes).await.map_err(|e| e.to_string())?;
     decode_hello(&bytes).map_err(str::to_owned)
-}
-async fn write_v2_frame(s: &mut (impl AsyncWrite + Unpin), frame: &FrameV2) -> Result<()> {
-    let bytes = frame.encode().map_err(str::to_owned)?;
-    s.write_u32(bytes.len() as u32)
-        .await
-        .map_err(|e| e.to_string())?;
-    s.write_all(&bytes).await.map_err(|e| e.to_string())?;
-    s.flush().await.map_err(|e| e.to_string())
-}
-async fn read_v2_frame(s: &mut (impl AsyncRead + Unpin)) -> Result<FrameV2> {
-    let len = s.read_u32().await.map_err(|e| e.to_string())? as usize;
-    if len == 0 || len > shuttli_protocol::MAX_CONTROL_FRAME_BYTES {
-        return Err("invalid v2 frame size".into());
-    }
-    let mut bytes = vec![0; len];
-    s.read_exact(&mut bytes).await.map_err(|e| e.to_string())?;
-    FrameV2::decode(&bytes).map_err(str::to_owned)
 }
 /// Time out idle polls before consuming bytes. Once a frame starts, finish it
 /// within the transfer deadline or close the session rather than retry mid-frame.
@@ -399,7 +358,41 @@ async fn selected(
         .map_err(|_| "application busy")?;
     Ok(live)
 }
+#[derive(Debug)]
+enum ConnectFailure {
+    HelloVersion(DeviceId),
+    Other(String),
+}
+impl From<String> for ConnectFailure {
+    fn from(error: String) -> Self {
+        Self::Other(error)
+    }
+}
+impl From<&str> for ConnectFailure {
+    fn from(error: &str) -> Self {
+        Self::Other(error.into())
+    }
+}
 async fn connect(s: Arc<Shared>, address: SocketAddr) -> Result<()> {
+    match connect_attempt(s.clone(), address, true, None).await {
+        Ok(()) => Ok(()),
+        Err(ConnectFailure::HelloVersion(identity)) => {
+            connect_attempt(s, address, false, Some(identity))
+                .await
+                .map_err(|failure| match failure {
+                    ConnectFailure::Other(error) => error,
+                    ConnectFailure::HelloVersion(_) => "HELLO negotiation failed".into(),
+                })
+        }
+        Err(ConnectFailure::Other(error)) => Err(error),
+    }
+}
+async fn connect_attempt(
+    s: Arc<Shared>,
+    address: SocketAddr,
+    prefer_v2: bool,
+    expected_id: Option<DeviceId>,
+) -> std::result::Result<(), ConnectFailure> {
     let mut tls = timeout(Duration::from_secs(5), async {
         let stream = TcpStream::connect(address)
             .await
@@ -424,24 +417,41 @@ async fn connect(s: Arc<Shared>, address: SocketAddr) -> Result<()> {
             .ok_or("missing server identity")?
             .as_ref(),
     )?;
+    if expected_id.is_some_and(|expected| expected != id) {
+        return Err("retry identity mismatch".into());
+    }
     let (name, remote_epoch, capabilities, v2) = timeout(Duration::from_secs(5), async {
         write_hello(
             &mut tls,
-            &Hello::V1 {
-                name: s.name.clone(),
-                epoch: s.epoch,
+            &if prefer_v2 {
+                Hello::V3 {
+                    name: s.name.clone(),
+                    epoch: s.epoch,
+                    capabilities: Capabilities::live(),
+                }
+            } else {
+                Hello::V1 {
+                    name: s.name.clone(),
+                    epoch: s.epoch,
+                }
             },
         )
         .await?;
-        match read_hello(&mut tls).await? {
+        let remote = match read_hello(&mut tls).await {
+            Ok(hello) => hello,
+            Err(_) if prefer_v2 => return Err(ConnectFailure::HelloVersion(id)),
+            Err(error) => return Err(ConnectFailure::Other(error)),
+        };
+        match remote {
             Hello::V1 { name, epoch } => {
-                Ok::<_, String>((name, epoch, Capabilities::legacy_desktop(), false))
+                Ok::<_, ConnectFailure>((name, epoch, Capabilities::legacy_desktop(), false))
             }
-            Hello::V2 {
+            Hello::V3 {
                 name,
                 epoch,
                 capabilities,
             } => Ok((name, epoch, capabilities, true)),
+            Hello::V2 { .. } => Err(ConnectFailure::HelloVersion(id)),
         }
     })
     .await
@@ -459,7 +469,7 @@ async fn connect(s: Arc<Shared>, address: SocketAddr) -> Result<()> {
     if v2 {
         let result = serve_v2_session(&s, &mut tls, id, &live).await;
         disconnected(&s, id, &live).await;
-        return result;
+        return result.map_err(ConnectFailure::Other);
     }
     let result = async {
         while live.load(Ordering::SeqCst) {
@@ -506,7 +516,7 @@ async fn connect(s: Arc<Shared>, address: SocketAddr) -> Result<()> {
     }
     .await;
     disconnected(&s, id, &live).await;
-    result
+    result.map_err(ConnectFailure::Other)
 }
 async fn discover(s: Arc<Shared>, mut addresses: Vec<IpAddr>, refresh: Arc<tokio::sync::Notify>) {
     let attempts = Arc::new(Semaphore::new(16));
@@ -561,6 +571,20 @@ async fn incoming_connection(s: Arc<Shared>, stream: TcpStream, address: SocketA
                     epoch: s.epoch,
                 },
             ),
+            Hello::V3 {
+                name,
+                epoch,
+                capabilities,
+            } => (
+                name,
+                epoch,
+                capabilities,
+                Hello::V3 {
+                    name: s.name.clone(),
+                    epoch: s.epoch,
+                    capabilities: Capabilities::live(),
+                },
+            ),
             Hello::V2 {
                 name,
                 epoch,
@@ -576,7 +600,7 @@ async fn incoming_connection(s: Arc<Shared>, stream: TcpStream, address: SocketA
                 },
             ),
         };
-        let v2 = matches!(reply, Hello::V2 { .. });
+        let v2 = matches!(reply, Hello::V2 { .. } | Hello::V3 { .. });
         write_hello(&mut tls, &reply).await?;
         Ok::<_, String>((name, epoch, capabilities, v2))
     })
@@ -715,6 +739,8 @@ async fn serve_v2_session(
         .get(&id)
         .ok_or("missing v2 session")?
         .capabilities;
+    let leader =
+        capabilities.accept_live_offer && shuttli_transport::leads_session(s.identity.id, id);
     let mut last_roster: Option<Vec<PeerHint>> = None;
     let mut roster_revision = 0u64;
     let mut last_history_revision: Option<(u64, u64)> = None;
@@ -769,10 +795,48 @@ async fn serve_v2_session(
                 }
             }
         }
-        let Some(frame) = read_v2_frame_or_idle(tls, Duration::from_secs(5)).await? else {
+        if leader {
+            if let Some(query) = take_query(s, id).await {
+                query_transfer_v2(s, tls, query).await?;
+            }
+            let pending = s.pending.lock().await.remove(&id);
+            if let Some(out) = pending {
+                send_pending_v2(s, tls, out).await?;
+            }
+            write_v2_frame(tls, &FrameV2::Poll).await?;
+        }
+        let Some(frame) = read_v2_frame_or_idle(
+            tls,
+            if leader {
+                DEADLINE
+            } else {
+                Duration::from_secs(5)
+            },
+        )
+        .await?
+        else {
+            if leader {
+                return Err("live response timeout".into());
+            }
             continue;
         };
         match frame {
+            FrameV2::Idle if leader => {}
+            FrameV2::Poll if capabilities.accept_live_offer && !leader => {
+                if let Some(query) = take_query(s, id).await {
+                    query_transfer_v2(s, tls, query).await?;
+                } else {
+                    let pending = s.pending.lock().await.remove(&id);
+                    if let Some(out) = pending {
+                        send_pending_v2(s, tls, out).await?;
+                    } else {
+                        write_v2_frame(tls, &FrameV2::Idle).await?;
+                    }
+                }
+            }
+            FrameV2::Status { event } => {
+                answer_query_v2(s, tls, id, event).await?;
+            }
             FrameV2::HistoryListRequest { cursor, limit } if capabilities.history_pull => {
                 let (reply, rx) = mpsc::sync_channel(1);
                 s.events
@@ -848,9 +912,106 @@ async fn serve_v2_session(
             }
             _ => return Err("unsupported v2 operation".into()),
         }
+        if leader {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
     }
     Ok(())
 }
+async fn send_pending_v2(s: &Shared, tls: &mut impl Duplex, out: Outbound) -> Result<()> {
+    let result = timeout(
+        DEADLINE,
+        shuttli_transport::send_live(
+            tls,
+            out.permit.event(),
+            out.permit.metadata(),
+            &out.payload.data,
+            || s.revision.load(Ordering::SeqCst) == out.permit.policy_revision(),
+            |_| Err("unexpected notice during transfer".into()),
+            || {},
+        ),
+    )
+    .await
+    .unwrap_or_else(|_| Err("transfer timed out; outcome unknown".into()));
+    let (state, detail) = match &result {
+        Ok(shuttli_transport::SendOutcome::Applied) => (
+            DeliveryState::Applied,
+            "receiver confirmed its reception target".into(),
+        ),
+        Ok(shuttli_transport::SendOutcome::Rejected) => {
+            (DeliveryState::Failed, "receiver rejected transfer".into())
+        }
+        Err(error) => (DeliveryState::Unknown, error.clone()),
+    };
+    if result.is_err() {
+        enqueue_query(
+            s,
+            Query {
+                peer: out.permit.target(),
+                event: out.permit.event(),
+                attempts: 0,
+            },
+        )
+        .await;
+    }
+    report(s, &out, state, detail).await;
+    result.map(|_| ())
+}
+
+async fn query_transfer_v2(s: &Shared, tls: &mut impl Duplex, mut query: Query) -> Result<()> {
+    let result = timeout(Duration::from_secs(5), async {
+        write_v2_frame(tls, &FrameV2::Status { event: query.event }).await?;
+        match read_v2_frame(tls).await? {
+            FrameV2::Receipt { event, state } if event == query.event => {
+                Ok(state.unwrap_or(DeliveryState::Unknown))
+            }
+            _ => Err("invalid receipt response".into()),
+        }
+    })
+    .await
+    .unwrap_or_else(|_| Err("receipt query timeout".into()));
+    match result {
+        Ok(state) => s
+            .events
+            .send(NetworkEvent::Delivery {
+                event: query.event,
+                peer: hex::encode(query.peer),
+                state,
+                detail: if state == DeliveryState::Applied {
+                    "receiver receipt recovered without repeating reception"
+                } else {
+                    "receiver has no confirmed receipt"
+                }
+                .into(),
+            })
+            .await
+            .map_err(|_| "application stopped".into()),
+        Err(error) => {
+            if query.attempts < 2 {
+                query.attempts += 1;
+                enqueue_query(s, query).await;
+            }
+            Err(error)
+        }
+    }
+}
+async fn answer_query_v2(
+    s: &Shared,
+    tls: &mut impl Duplex,
+    peer: DeviceId,
+    event: EventId,
+) -> Result<()> {
+    if event.origin != peer {
+        return Err("receipt query owner mismatch".into());
+    }
+    let (reply, rx) = mpsc::sync_channel(1);
+    s.events
+        .try_send(NetworkEvent::ReceiptQuery { peer, event, reply })
+        .map_err(|_| "application busy")?;
+    let state = application_reply(rx).await?;
+    write_v2_frame(tls, &FrameV2::Receipt { event, state }).await
+}
+
 async fn report(s: &Shared, out: &Outbound, state: DeliveryState, detail: String) {
     // Await capacity: terminal results are never dropped while the service lives.
     // Producers are bounded by session/handshake slots and the outgoing queue.
@@ -868,7 +1029,7 @@ fn transfer_outcome(result: &Result<TransferResult>) -> (DeliveryState, String) 
     match result {
         Ok(TransferResult::Applied) => (
             DeliveryState::Applied,
-            "remote OS readback and durable receipt completed".into(),
+            "receiver confirmed its reception target".into(),
         ),
         Ok(TransferResult::Rejected(message)) => (DeliveryState::Failed, message.clone()),
         Err(message) => (DeliveryState::Unknown, message.clone()),
@@ -988,41 +1149,27 @@ async fn send_transfer(
     tls: &mut impl Duplex,
     out: &Outbound,
 ) -> Result<TransferResult> {
-    let p = &out.permit;
-    let check = || {
-        if s.revision.load(Ordering::SeqCst) == p.policy_revision() {
-            Ok(())
-        } else {
-            Err("send permission changed".to_string())
-        }
-    };
-    check()?;
-    write_frame(
+    match shuttli_transport::send_live_version(
         tls,
-        &Frame::Offer {
-            event: p.event(),
-            meta: p.metadata().clone(),
+        shuttli_transport::LiveOffer {
+            event: out.permit.event(),
+            metadata: out.permit.metadata(),
+            body: &out.payload.data,
         },
+        || s.revision.load(Ordering::SeqCst) == out.permit.policy_revision(),
+        |_| Err("unexpected live notice".into()),
+        || {},
+        shuttli_transport::WireVersion::V1,
     )
-    .await?;
-    match read_frame(tls).await? {
-        Frame::Ready => {}
-        Frame::Error { message } => {
-            return Ok(TransferResult::Rejected(safe_remote_error(&message)));
-        }
-        _ => return Err("expected READY".into()),
-    }
-    for chunk in out.payload.data.chunks(65536) {
-        check()?;
-        tls.write_all(chunk).await.map_err(|e| e.to_string())?;
-    }
-    tls.flush().await.map_err(|e| e.to_string())?;
-    match read_frame(tls).await? {
-        Frame::Applied => Ok(TransferResult::Applied),
-        Frame::Error { message } => Ok(TransferResult::Rejected(safe_remote_error(&message))),
-        _ => Err("missing APPLIED receipt".into()),
+    .await?
+    {
+        shuttli_transport::SendOutcome::Applied => Ok(TransferResult::Applied),
+        shuttli_transport::SendOutcome::Rejected => Ok(TransferResult::Rejected(
+            safe_remote_error("receiver denied transfer"),
+        )),
     }
 }
+
 struct ReceiveGuard {
     permit: Option<tokio::sync::mpsc::OwnedPermit<NetworkEvent>>,
     event: EventId,
@@ -1149,13 +1296,10 @@ async fn receive_transfer(
         }
     };
     write_receive_reply(tls, v2, ReceiveReply::Ready).await?;
-    let mut bytes = vec![0; meta.size as usize];
-    for chunk in bytes.chunks_mut(65536) {
-        if s.revision.load(Ordering::SeqCst) != ticket.policy_revision() {
-            return Err("receive permission changed".into());
-        }
-        tls.read_exact(chunk).await.map_err(|e| e.to_string())?;
-    }
+    let bytes = shuttli_transport::receive_body(tls, &meta, || {
+        s.revision.load(Ordering::SeqCst) == ticket.policy_revision()
+    })
+    .await?;
     if !s
         .sessions
         .lock()
@@ -1332,7 +1476,7 @@ mod tests {
             decode_hello(br#"{"type":"hello","version":1,"name":"n","required":"unknown"}"#)
                 .is_err()
         );
-        assert!(decode_hello(br#"{"type":"hello","version":3}"#).is_err());
+        assert!(decode_hello(br#"{"type":"hello","version":4}"#).is_err());
     }
 
     #[tokio::test(flavor = "current_thread")]

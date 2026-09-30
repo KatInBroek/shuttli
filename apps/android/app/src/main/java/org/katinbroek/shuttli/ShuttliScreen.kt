@@ -415,6 +415,10 @@ private fun statusText(data: UiSnapshot): String = stringResource(when (data.sta
 @Composable
 private fun actionText(key: String): String = stringResource(when (key) {
     "send_queued" -> R.string.send_queued
+    "transfer_applied" -> R.string.transfer_applied
+    "transfer_failed" -> R.string.transfer_failed
+    "transfer_unknown" -> R.string.transfer_unknown
+    "send_partial" -> R.string.send_partial
     "no_send_targets" -> R.string.no_send_targets
     "unsupported_image" -> R.string.unsupported_image
     "unsupported_text" -> R.string.unsupported_text

@@ -51,6 +51,111 @@ fn merge_is_event_based_and_never_copies_to_os() {
 }
 
 #[test]
+fn live_commit_is_verified_idempotent_bounded_and_merges_with_later_history() {
+    let mut history = MobileHistory::new(2);
+    let generation = history.enter_foreground();
+    let source = [1; 32];
+    let summary = page(source, [3; 16], 1, b"live").items.remove(0);
+    let event = summary.event;
+    for _ in 0..2 {
+        history
+            .receive_live(
+                generation,
+                source,
+                event,
+                summary.metadata.clone(),
+                b"live".to_vec(),
+                200,
+            )
+            .unwrap();
+    }
+    assert_eq!(history.timeline().len(), 1);
+    assert!(
+        history.source(source).is_none(),
+        "a live commit does not claim a list reconciliation"
+    );
+    history
+        .merge_page(generation, source, page(source, [3; 16], 1, b"live"), 300)
+        .unwrap();
+    assert_eq!(history.timeline().len(), 1);
+    assert_eq!(history.timeline()[0].summary.copied_at_ms, 100);
+    assert_eq!(&*history.body_for_explicit_copy(event).unwrap(), b"live");
+    assert_eq!(
+        history.receive_live(
+            generation,
+            [2; 32],
+            event,
+            summary.metadata.clone(),
+            b"live".to_vec(),
+            200
+        ),
+        Err(HistoryError::InvalidBody)
+    );
+    assert_eq!(
+        history.receive_live(
+            generation,
+            source,
+            event,
+            summary.metadata.clone(),
+            b"fake".to_vec(),
+            200
+        ),
+        Err(HistoryError::InvalidBody)
+    );
+    history.enter_background();
+    assert_eq!(
+        history.receive_live(
+            generation,
+            source,
+            event,
+            summary.metadata.clone(),
+            b"live".to_vec(),
+            200
+        ),
+        Err(HistoryError::Background)
+    );
+    let generation = history.enter_foreground();
+    history.set_mode(HistoryMode::Status);
+    assert_eq!(
+        history.receive_live(
+            generation,
+            source,
+            event,
+            summary.metadata.clone(),
+            b"live".to_vec(),
+            200
+        ),
+        Err(HistoryError::Disabled)
+    );
+    history.set_mode(HistoryMode::Content);
+    history.set_limit(0);
+    assert_eq!(
+        history.receive_live(
+            generation,
+            source,
+            event,
+            summary.metadata.clone(),
+            b"live".to_vec(),
+            200
+        ),
+        Err(HistoryError::Disabled)
+    );
+    history.set_limit(2);
+    history.clear();
+    assert_eq!(
+        history.receive_live(
+            generation,
+            source,
+            event,
+            summary.metadata,
+            b"live".to_vec(),
+            200
+        ),
+        Err(HistoryError::Background)
+    );
+}
+
+#[test]
 fn forged_or_changed_pages_and_bodies_do_not_mutate_history() {
     let mut history = MobileHistory::default();
     let generation = history.enter_foreground();

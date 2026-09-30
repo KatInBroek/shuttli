@@ -52,7 +52,7 @@ out.mkdir(parents=True, exist_ok=True)
 manifest = {
     "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip(),
     "sdk_api": 6,
-    "wire_version": 2,
+    "wire_version": 3,
     "min_sdk": 29,
     "target_sdk": 36,
     "files": {name: {"sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "bytes": path.stat().st_size}

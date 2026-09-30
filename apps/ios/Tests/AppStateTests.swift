@@ -4,6 +4,18 @@ import UIKit
 
 final class AppStateTests: XCTestCase {
     @MainActor
+    func testSendStatusSettlesFromRealReceipts() {
+        XCTAssertEqual(AppState.sendStatus([.queued]), "send_queued")
+        XCTAssertEqual(AppState.sendStatus([.applied, .sending]), "send_queued")
+        XCTAssertEqual(AppState.sendStatus([.applied, .applied]), "transfer_applied")
+        XCTAssertEqual(AppState.sendStatus([.applied, .unknown]), "send_partial")
+        XCTAssertEqual(AppState.sendStatus([.applied, .failed]), "send_partial")
+        XCTAssertEqual(AppState.sendStatus([.unknown, .failed]), "transfer_unknown")
+        XCTAssertEqual(AppState.sendStatus([.failed]), "transfer_failed")
+        XCTAssertEqual(AppState.sendStatus([]), "transfer_unknown")
+    }
+
+    @MainActor
     func testImportFreezesDraftWithoutSendingOrChangingClipboard() {
         let state = AppState()
         UIPasteboard.general.string = "clipboard sentinel"
