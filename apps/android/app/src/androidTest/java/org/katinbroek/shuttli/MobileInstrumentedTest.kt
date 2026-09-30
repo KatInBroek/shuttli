@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.util.Log
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -95,9 +96,11 @@ class MobileInstrumentedTest {
             rule.onNodeWithText(rule.activity.getString(R.string.system_language)).performClick()
             rule.onNodeWithText("Français").performClick()
             rule.waitUntil(5000) { LanguageStore.current(rule.activity) == "fr" }
-            rule.onNodeWithText("Historique").assertExists()
+            rule.waitUntil(5000) { rule.activity.getString(R.string.settings) == "Réglages" }
+            rule.onAllNodesWithText("Réglages")[0].assertExists()
             rule.activityRule.scenario.recreate()
-            rule.onNodeWithText("Historique").assertExists()
+            rule.waitUntil(5000) { rule.activity.getString(R.string.settings) == "Réglages" }
+            rule.onAllNodesWithText("Réglages")[0].assertExists()
         } finally {
             rule.runOnUiThread { LanguageStore.change(rule.activity, original) }
             rule.waitUntil(5000) { LanguageStore.current(rule.activity) == original }
