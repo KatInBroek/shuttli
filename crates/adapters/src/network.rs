@@ -1664,6 +1664,91 @@ mod delivery_tests {
         }
     }
     #[tokio::test(flavor = "current_thread")]
+    async fn legacy_hello_retry_is_pinned_to_the_authenticated_identity() {
+        for changed_identity in [false, true] {
+            let (shared, mut events, _) = fixture();
+            let first = Arc::new(Identity::generate().unwrap().0);
+            let expected = first.id;
+            let second = if changed_identity {
+                Arc::new(Identity::generate().unwrap().0)
+            } else {
+                first.clone()
+            };
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let legacy = tokio::spawn(async move {
+                let (socket, _) = listener.accept().await.unwrap();
+                let mut initial = TlsAcceptor::from(first.server.clone())
+                    .accept(socket)
+                    .await
+                    .unwrap();
+                assert!(matches!(
+                    read_hello(&mut initial).await.unwrap(),
+                    Hello::V3 { .. }
+                ));
+                drop(initial); // Original strict v1 parser closes after unsupported HELLO.
+                let (socket, _) = listener.accept().await.unwrap();
+                let mut retry = TlsAcceptor::from(second.server.clone())
+                    .accept(socket)
+                    .await
+                    .unwrap();
+                if changed_identity {
+                    return;
+                }
+                assert!(matches!(
+                    read_hello(&mut retry).await.unwrap(),
+                    Hello::V1 { .. }
+                ));
+                write_hello(
+                    &mut retry,
+                    &Hello::V1 {
+                        name: "Legacy peer".into(),
+                        epoch: [7; 16],
+                    },
+                )
+                .await
+                .unwrap();
+                let Frame::Select { initiator } = read_frame(&mut retry).await.unwrap() else {
+                    panic!()
+                };
+                write_frame(&mut retry, &Frame::Select { initiator })
+                    .await
+                    .unwrap();
+                assert!(matches!(read_frame(&mut retry).await.unwrap(), Frame::Poll));
+                write_frame(&mut retry, &Frame::Idle).await.unwrap();
+            });
+            let running = shared.clone();
+            let connecting = tokio::spawn(async move { connect(running, address).await });
+            if changed_identity {
+                assert!(
+                    timeout(Duration::from_secs(2), connecting)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .unwrap_err()
+                        .contains("identity mismatch")
+                );
+                assert!(events.try_recv().is_err());
+                assert!(shared.sessions.lock().await.is_empty());
+            } else {
+                let Some(NetworkEvent::Peer(peer)) = timeout(Duration::from_secs(2), events.recv())
+                    .await
+                    .unwrap()
+                else {
+                    panic!()
+                };
+                assert_eq!(peer.id, hex::encode(expected));
+                assert!(peer.online);
+                assert_eq!(peer.capabilities, Capabilities::legacy_desktop());
+                connecting.abort();
+            }
+            timeout(Duration::from_secs(2), legacy)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+    }
+    #[tokio::test(flavor = "current_thread")]
     async fn full_queue_retains_success_until_consumer_has_capacity() {
         let (shared, mut receiver, out) = fixture();
         fill(&shared, 64);

@@ -80,6 +80,17 @@ fn live_commit_is_verified_idempotent_bounded_and_merges_with_later_history() {
     assert_eq!(history.timeline().len(), 1);
     assert_eq!(history.timeline()[0].summary.copied_at_ms, 100);
     assert_eq!(&*history.body_for_explicit_copy(event).unwrap(), b"live");
+    let mut redacted = page(source, [3; 16], 1, b"live");
+    redacted.items[0].body_available = false;
+    redacted.items[0].metadata.digest = [0; 32];
+    history
+        .merge_page(generation, source, redacted, 400)
+        .unwrap();
+    assert_eq!(
+        &*history.body_for_explicit_copy(event).unwrap(),
+        b"live",
+        "remote history availability cannot recall a separately confirmed live reception"
+    );
     assert_eq!(
         history.receive_live(
             generation,

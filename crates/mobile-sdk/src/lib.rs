@@ -24,6 +24,9 @@ pub struct TimelineItem {
     pub source: DeviceId,
     pub summary: HistorySummary,
     pub body: Option<CachedBody>,
+    /// A live receipt is independent of whether the source still retains an
+    /// exportable history body. A later list must not recall accepted content.
+    pub live_received: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -220,15 +223,21 @@ impl MobileHistory {
             self.rows
                 .entry(id)
                 .and_modify(|row| {
-                    if !summary.body_available {
+                    if !summary.body_available && !row.live_received {
                         row.body = None;
                     }
-                    row.summary = summary.clone();
+                    let mut updated = summary.clone();
+                    if row.live_received && row.body.is_some() && updated.metadata.digest == [0; 32]
+                    {
+                        updated.metadata.digest = row.summary.metadata.digest;
+                    }
+                    row.summary = updated;
                 })
                 .or_insert_with(|| TimelineItem {
                     source,
                     summary,
                     body: None,
+                    live_received: false,
                 });
         }
         self.freshness.insert(
@@ -323,6 +332,7 @@ impl MobileHistory {
                     body_available: cached.is_some(),
                 },
                 body: cached,
+                live_received: false,
             },
         );
         self.trim();
@@ -395,6 +405,7 @@ impl MobileHistory {
                     body_available: true,
                 },
                 body: Some(body),
+                live_received: true,
             },
         );
         self.trim();
