@@ -825,7 +825,7 @@ fn receipt_state(
             .history
             .lock()
             .map_err(|_| "history unavailable")?
-            .body_available(event)
+            .live_receipt_available(event)
         {
             shuttli_model::sync::DeliveryState::Applied
         } else {

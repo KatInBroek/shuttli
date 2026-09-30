@@ -949,6 +949,39 @@ async fn original_v1_tls_peer_can_send_and_receive_with_app_cache_adapter() {
         epoch: [9; 16],
         seq: 1,
     };
+    let pulled = b"queried history content";
+    let pulled_meta = Metadata {
+        format: Format::Text,
+        size: pulled.len() as u64,
+        digest: shuttli_content::canonical_digest(Format::Text, pulled).unwrap(),
+    };
+    {
+        let mut cache = history.lock().unwrap();
+        let generation = cache.generation();
+        cache
+            .merge_page(
+                generation,
+                source,
+                shuttli_model::mobile::HistoryListResponse {
+                    source_epoch: previous.epoch,
+                    revision: 1,
+                    items: vec![HistorySummary {
+                        event: previous,
+                        metadata: pulled_meta,
+                        copied_at_ms: 1,
+                        body_available: true,
+                    }],
+                    next: None,
+                },
+                2,
+            )
+            .unwrap();
+        cache
+            .cache_body(generation, previous, pulled.to_vec())
+            .unwrap();
+        assert!(cache.body_available(previous));
+        assert!(!cache.live_receipt_available(previous));
+    }
     write_live_frame(
         &mut remote,
         &FrameV2::Status { event: previous },

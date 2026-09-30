@@ -424,6 +424,9 @@ impl MobileHistory {
             None => false,
         })
     }
+    pub(crate) fn live_receipt_available(&self, event: EventId) -> bool {
+        self.rows.get(&event).is_some_and(|row| row.live_received) && self.body_available(event)
+    }
     pub fn timeline(&self) -> Vec<TimelineItem> {
         let mut rows: Vec<_> = self.rows.values().cloned().collect();
         rows.sort_by(|a, b| {
