@@ -235,7 +235,10 @@ final class AppState: ObservableObject {
     }
 
     func importText(_ text: String) {
-        guard !text.isEmpty, text.utf8.count <= 1_048_576 else { return }
+        guard !text.isEmpty, text.utf8.count <= 1_048_576, !text.contains("\0") else {
+            sendStatusKey = "unsupported_text"; return
+        }
+        sendStatusKey = nil
         draft = text
         imageDraft = nil
     }

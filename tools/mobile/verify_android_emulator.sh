@@ -18,10 +18,12 @@ adb install -r apps/android/app/build/outputs/apk/debug/app-debug.apk
 adb install -r apps/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb install -r apps/android/paste-probe/build/outputs/apk/debug/paste-probe-debug.apk
 
-result=$(adb shell am instrument -w -e class org.katinbroek.shuttli.MobileInstrumentedTest \
+result=$(adb shell am instrument -w -e coverage true -e class org.katinbroek.shuttli.MobileInstrumentedTest \
   org.katinbroek.shuttli.test/androidx.test.runner.AndroidJUnitRunner)
 [[ $result == *'OK (7 tests)'* ]] || { echo "$result"; exit 1; }
 printf '%s\n' "$result"
+mkdir -p apps/android/app/build/outputs/code_coverage/manual
+adb exec-out run-as org.katinbroek.shuttli cat files/coverage.ec > apps/android/app/build/outputs/code_coverage/manual/ui.ec
 
 adb logcat -c
 result=$(adb shell am instrument -w -e class \

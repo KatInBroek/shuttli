@@ -103,3 +103,4 @@
 "content_types_help" = "Kies welke typen je verzendt en ophaalt. Metadata en eerder ontvangen kopieën blijven in de geschiedenis.";
 "language" = "Taal";
 "system_language" = "Systeemstandaard";
+"unsupported_text" = "Tekst te groot of niet ondersteund";

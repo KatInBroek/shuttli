@@ -9,7 +9,9 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.hasScrollToNodeAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performScrollToNode
 import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -76,11 +78,13 @@ class MobileInstrumentedTest {
         rule.onNodeWithText(activity.getString(R.string.targets_help)).assertExists()
         rule.onNodeWithText(activity.getString(R.string.done)).performClick()
         rule.onNodeWithText(activity.getString(R.string.settings)).performClick()
-        rule.onNodeWithText(activity.getString(R.string.clear_history)).performScrollTo().performClick()
+        rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(activity.getString(R.string.clear_history)))
+        rule.onNodeWithText(activity.getString(R.string.clear_history)).performClick()
         rule.onNodeWithText(activity.getString(R.string.clear_history_help)).assertExists()
         rule.onNodeWithText(activity.getString(R.string.cancel)).performClick()
         rule.onNodeWithText(activity.getString(R.string.clear_history_help)).assertDoesNotExist()
-        rule.onNodeWithText(activity.getString(R.string.app_version, BuildConfig.VERSION_NAME)).performScrollTo().assertExists()
+        rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(activity.getString(R.string.app_version, BuildConfig.VERSION_NAME)))
+        rule.onNodeWithText(activity.getString(R.string.app_version, BuildConfig.VERSION_NAME)).assertExists()
     }
 
     @Test fun exportedImageStaysReadableAfterHistoryClear() {

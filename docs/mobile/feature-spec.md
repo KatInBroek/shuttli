@@ -58,7 +58,7 @@ One shared Rust SDK, independent native iOS and Android apps, and desktop protoc
 | MOB-10 | Defaults: manual phone sending, new-peer phone send off/receive on, recent history limit 20. Expose per-device direction/content and history Off/Status/Content, retention and clear controls; no global mobile direction toggles. Desktop global controls remain unchanged. |
 | MOB-11 | Text/history bodies stay in process memory; image cache objects are encrypted with a session-only key and cleaned under bounded quotas. History Off disables phone queries and caching. Clearing local history does not recall remote deliveries or clear OS clipboards; authorized retained remote copies may appear again on a later query. Explain this in the clear action. |
 | MOB-12 | Show Updating, last checked time per source, no connected computer, connected but not allowed to send to this phone, unavailable devices, incomplete history, expired bodies, permission denial, and unknown delivery honestly. A current retained window never proves that every offline-period copy was recovered. |
-| MOB-13 | Use Home, History, item detail, Devices and Settings with native navigation, the shared brand, English/Dutch/German/French, accessibility and light/dark layouts. Content never appears in system notifications. |
+| MOB-13 | Use Home (merged history), item detail, Devices and Settings with native navigation, the shared brand, English/Dutch/German/French, accessibility and light/dark layouts. Content never appears in system notifications. |
 | MOB-14 | Bound peer counts, message sizes, pagination, body transfers, cache, work queues and foreground resource use. Reuse the authenticated transport and version its peer-list, history-list/get and change messages. Capability negotiation, not OS kind, selects operations. |
 
 ## Platform-specific requirements
@@ -170,3 +170,28 @@ Lower-layer gates before UI acceptance: core tests prove no peer-list disclosure
 | MOB-T08 | A peer advertising `peer_hints` and `history_pull` but not `accept_live_offer` gets rosters and queried history, no unsolicited clipboard body. A normal desktop peer retains live offers. Session initiator and OS kind never change these rules. | #50, #51, #52 |
 
 Issue [#50](https://github.com/KatInBroek/shuttli/issues/50) owns shared core/SDK/protocol and desktop changes. [#51](https://github.com/KatInBroek/shuttli/issues/51) and [#52](https://github.com/KatInBroek/shuttli/issues/52) own independent native apps and real-device acceptance. Simulator or core-only results do not complete a platform issue. Keep machine-specific test evidence outside the repository.
+
+## Native UI implementation
+
+The native applications use three tabs: Home (merged history), Devices and
+Settings. Text/image previews and Copy are available on history cards; long text
+expands and images open a larger preview. A fixed send panel reads the clipboard
+only through Paste, freezes the imported snapshot, lists eligible destinations
+without changing permissions, and requires a separate Send. Per-destination
+results remain on the resulting local history card. Reusing local history is
+retained as an explicit action.
+
+Device details separate receiving, sending and content types. Enabling sending
+requires comparison of the authenticated fingerprint. Content preferences apply
+to new outgoing sends and history-body retrieval; metadata and already cached
+copies remain visible. Settings expose this distinction, local identity,
+retention, clear confirmation, system/English/Dutch/German/French language and
+the actual application version. Manual refresh coalesces with active history
+work without restarting sessions or replaying outgoing sends.
+
+Android unit and emulator tests produce JaCoCo reports for all app-owned Kotlin.
+The shared mobile SDK and native Rust boundary produce LLVM coverage alongside
+the existing core >95% gate. Coverage reports distinguish history model, peer
+policy, transport, encrypted cache and native boundary rather than presenting
+core coverage as whole-app coverage. A simulator build does not substitute for
+real-device clipboard acceptance on iOS.

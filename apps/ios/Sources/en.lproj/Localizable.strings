@@ -103,3 +103,4 @@
 "content_types_help" = "Choose the types to send and retrieve. Listed metadata and previously received copies stay in history.";
 "language" = "Language";
 "system_language" = "System default";
+"unsupported_text" = "Text is too large or unsupported";

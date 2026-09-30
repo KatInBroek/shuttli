@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package org.katinbroek.shuttli
 
 import android.app.Activity
@@ -84,7 +86,7 @@ private fun HistoryPage(data: UiSnapshot, state: MobileAppState) {
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         IconButton(onClick = state::refreshHistory) { Icon(AppIcon.Refresh.vector, stringResource(R.string.refresh)) }
     }
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf(R.string.all, R.string.sent_from_phone, R.string.images).forEachIndexed { index, label ->
             FilterChip(selected = filter == index, onClick = { filter = index }, label = { Text(stringResource(label)) })
         }
@@ -335,7 +337,7 @@ private fun SettingsPage(data: UiSnapshot, state: MobileAppState, activity: Acti
             Text(stringResource(R.string.manual_clipboard_help), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } }
         item { SettingsSection(stringResource(R.string.history_mode)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf(MobileHistoryMode.CONTENT to R.string.history_content, MobileHistoryMode.STATUS to R.string.history_status,
                     MobileHistoryMode.OFF to R.string.history_off).forEach { (mode, label) ->
                     FilterChip(selected = data.historyMode == mode, onClick = { state.setHistoryMode(mode) }, label = { Text(stringResource(label)) })

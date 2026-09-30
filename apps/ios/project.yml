@@ -31,3 +31,30 @@ targets:
     settings:
       base:
         SWIFT_STRICT_CONCURRENCY: minimal
+
+  ShuttliTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.katinbroek.shuttli.tests
+    dependencies:
+      - target: Shuttli
+  ShuttliUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.katinbroek.shuttli.uitests
+    dependencies:
+      - target: Shuttli
+schemes:
+  Shuttli:
+    build:
+      targets:
+        Shuttli: all
+    test:
+      targets: [ShuttliTests, ShuttliUITests]
+      gatherCoverageData: true

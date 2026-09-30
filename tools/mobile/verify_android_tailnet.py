@@ -115,7 +115,8 @@ def main():
     try:
         command("peer", phone_id, "send", "on")
         with (output / "instrumentation.log").open("w") as log:
-            process = subprocess.Popen([*adb, "shell", "am", "instrument", "-w", "-e", "class",
+            process = subprocess.Popen([*adb, "shell", "am", "instrument", "-w",
+                *(["-e", "coverage", "true"] if config.get("instrumentation_coverage") else []), "-e", "class",
                 "org.katinbroek.shuttli.TailnetInstrumentedTest", *options,
                 "org.katinbroek.shuttli.test/androidx.test.runner.AndroidJUnitRunner"], stdout=log,
                 stderr=subprocess.STDOUT)

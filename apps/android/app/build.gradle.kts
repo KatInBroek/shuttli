@@ -54,7 +54,6 @@ dependencies {
 // bindings live in a different package and cannot inflate application coverage.
 jacoco { toolVersion = "0.8.13" }
 tasks.register<JacocoReport>("mobileCoverageReport") {
-    dependsOn("testDebugUnitTest")
     classDirectories.setFrom(fileTree(layout.buildDirectory.dir("tmp/kotlin-classes/debug")) {
         include("org/katinbroek/shuttli/**")
     })
@@ -62,5 +61,6 @@ tasks.register<JacocoReport>("mobileCoverageReport") {
     executionData.setFrom(fileTree(layout.buildDirectory) {
         include("outputs/unit_test_code_coverage/**/*.exec", "outputs/code_coverage/**/*.ec")
     })
+    doFirst { require(executionData.files.any { it.exists() }) { "Run unit or emulator tests before generating coverage" } }
     reports { xml.required.set(true); html.required.set(true) }
 }

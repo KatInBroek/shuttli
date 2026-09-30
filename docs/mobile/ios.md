@@ -62,7 +62,7 @@ History defaults to 20 merged events (0-10,000, subject to quotas); modes Off/St
 
 ## UI and lifecycle
 
-Provide Home, History, Devices and Settings using native navigation and the shared logo. Support system language plus English, Dutch, German and French; VoiceOver, dynamic type, light/dark themes and long names. States must not depend only on color.
+Provide Home (merged history), Devices and Settings using native navigation and the shared logo. Support system language plus English, Dutch, German and French; VoiceOver, dynamic type, light/dark themes and long names. States must not depend only on color.
 
 Only active state admits new content operations; background entry closes listeners and network tasks. Temporary inactivity, such as a system paste prompt, must not erase the entire session history. Discard late callbacks using session IDs. Lock, termination, network changes and resume never replay a draft. Interrupted transfers become cancelled/failed/unknown according to actual evidence; completed receipts retain their historical meaning.
 

@@ -103,3 +103,4 @@
 "content_types_help" = "Choisissez les types à envoyer et récupérer. Les métadonnées et les copies déjà reçues restent dans l’historique.";
 "language" = "Langue";
 "system_language" = "Langue du système";
+"unsupported_text" = "Texte trop grand ou non pris en charge";

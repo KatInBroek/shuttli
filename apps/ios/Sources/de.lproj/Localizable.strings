@@ -103,3 +103,4 @@
 "content_types_help" = "Wähle die zu sendenden und abzurufenden Typen. Metadaten und zuvor empfangene Kopien bleiben im Verlauf.";
 "language" = "Sprache";
 "system_language" = "Systemstandard";
+"unsupported_text" = "Text zu groß oder nicht unterstützt";

@@ -55,6 +55,7 @@ internal data class UiSnapshot(
 class MobileAppState(private val app: Application) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lifecycle = Mutex()
+    private val actions = Mutex()
     private val session by lazy { MobileSession() }
     private var refreshJob: Job? = null
     @Volatile private var active = false
@@ -217,8 +218,9 @@ class MobileAppState(private val app: Application) {
 
     fun sendDraft() {
         scope.launch {
-            if (!active) return@launch
-            val draft = snapshot.draft ?: return@launch
+            actions.withLock {
+            if (!active) return@withLock
+            val draft = snapshot.draft ?: return@withLock
             val count = when (draft) {
                 is Draft.Text -> session.sendText(draft.value)
                 is Draft.Image -> session.sendImage(draft.png)
@@ -226,6 +228,7 @@ class MobileAppState(private val app: Application) {
             post { it.copy(draft = if (count > 0u) null else it.draft,
                 actionStatus = if (count > 0u) "send_queued" else "no_send_targets") }
             refresh()
+            }
         }
     }
 

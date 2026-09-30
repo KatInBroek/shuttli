@@ -804,6 +804,53 @@ mod tests {
     }
 
     #[test]
+    fn native_settings_and_manual_actions_fail_closed_without_a_connection() {
+        let session = MobileSession::default();
+        assert!(matches!(session.history_mode(), MobileHistoryMode::Content));
+        assert_eq!(session.history_limit(), 20);
+        assert!(session.set_history_limit(0));
+        assert!(!session.set_history_limit(10_001));
+        session.set_history_mode(MobileHistoryMode::Status);
+        assert!(matches!(session.history_mode(), MobileHistoryMode::Status));
+        session.set_history_mode(MobileHistoryMode::Off);
+        assert!(matches!(session.history_mode(), MobileHistoryMode::Off));
+        assert!(!session.configure_image_cache(String::new()));
+        assert!(!session.configure_image_cache("x".repeat(4097)));
+        for id in ["invalid".to_string(), "aa".repeat(31), "aa".repeat(32)] {
+            assert!(!session.set_receive(id.clone(), true));
+            assert!(!session.set_send(id, true));
+        }
+        assert!(session.device_rows().is_empty());
+        assert!(session.transfer_rows().is_empty());
+        assert_eq!(session.send_text("manual copy".into()), 0);
+        assert_eq!(session.send_text(String::new()), 0);
+        assert_eq!(session.send_text("a\0b".into()), 0);
+        assert_eq!(session.send_text("x".repeat(1_048_577)), 0);
+        assert_eq!(session.send_image(vec![0; 32]), 0);
+        assert_eq!(session.resend_local("invalid".into()), 0);
+        let foreign = EventId {
+            origin: [9; 32],
+            epoch: [3; 16],
+            seq: 1,
+        };
+        assert_eq!(session.resend_local(event_key(foreign)), 0);
+        assert!(session.history_body(event_key(foreign)).is_empty());
+        let (_, identity) = Identity::generate().unwrap();
+        assert!(
+            !session
+                .start_listener(identity.clone(), "100.64.0.1".into(), "Phone".into())
+                .is_empty()
+        );
+        session.enter_foreground();
+        assert!(
+            !session
+                .start_listener(identity, "invalid".into(), "Phone".into())
+                .is_empty()
+        );
+        assert_eq!(session.send_text("manual copy".into()), 0);
+    }
+
+    #[test]
     fn event_keys_are_exact_and_cannot_select_another_item() {
         let event = EventId {
             origin: [4; 32],
