@@ -64,6 +64,16 @@ def main():
     assert status["settings"]["automatic"]
     subprocess.run([*adb, "shell", "am", "start", "-n", "org.katinbroek.shuttli/.MainActivity"],
                    check=True, stdout=subprocess.DEVNULL, timeout=10)
+    deadline = time.monotonic() + 60
+    while True:
+        with socket.socket() as probe:
+            probe.settimeout(3)
+            if probe.connect_ex((str(phone_ip), 45987)) == 0:
+                break
+        assert time.monotonic() < deadline, "Foreground listener is not reachable over the VPN"
+        time.sleep(0.5)
+    # Refresh after startup, rather than spending a discovery turn before the
+    # native app has loaded its identity and opened the foreground listener.
     command("refresh")
     deadline = time.monotonic() + 60
     while True:
@@ -197,6 +207,13 @@ def main():
         result = (output / "instrumentation.log").read_text()
         assert "OK (1 test)" in result, result
         print("Real Tailscale clipboard/history/consent test passed")
+    except BaseException:
+        for name in ("status", "devices", "history"):
+            try:
+                (output / f"failed-{name}.json").write_text(json.dumps(command(name)))
+            except Exception:
+                pass
+        raise
     finally:
         if process is not None and process.poll() is None:
             subprocess.run([*adb, "shell", "am", "force-stop", "org.katinbroek.shuttli"], timeout=10)
