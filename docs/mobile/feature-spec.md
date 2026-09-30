@@ -76,6 +76,71 @@ One shared Rust SDK, independent native iOS and Android apps, and desktop protoc
 - The app makes no claim of automatic phone clipboard sync, background reception, complete tailnet discovery, or guaranteed delivery while closed. A requested phone copy is checked through the platform adapter and reported as verified or uncertain according to real evidence.
 - Exclude file transfer, standalone LAN discovery, background services, push delivery, share extensions, shortcuts, embedded VPN, phone-only initial discovery, and store publication from this first release.
 
+## History reception and status assessment
+
+Foreground history reception remains the mobile operating model. A computer's
+history-change hint prompts a query; metadata is merged by event identity and
+only missing eligible bodies are retrieved. This updates app history without
+changing the phone clipboard. Current transport rechecks the bounded recent
+metadata window rather than requesting a strict revision delta. A fifteen-second
+foreground reconciliation provides recovery from missed hints. These mechanics
+are distinct from live desktop clipboard publication.
+
+The current implementation has status gaps that must be resolved before complete
+mobile UI acceptance:
+
+- The desktop publication path creates an outgoing live-transfer record for a
+  pull-only peer; the network adapter subsequently marks it Cancelled because
+  that peer does not accept live offers. A normal negotiated receiving mode is
+  not a cancellation or a failed history reception. Filter unsupported live
+  targets before enqueueing and recording a live transfer, while retaining local
+  copies and current-policy history access. Mixed desktop/mobile peer sets must
+  retain ordinary desktop delivery.
+- Source freshness currently records metadata-page checks. Native bindings expose
+  device connectivity and item availability, but do not expose a complete
+  per-source query/body activity and error snapshot. Connectivity alone does not
+  establish permission, history freshness or content reception.
+- A history Error frame clears pending requests without preserving a classified
+  source error for presentation. Keep useful cached rows and distinguish denied,
+  unavailable, stale-cursor recovery and body failure from a successfully empty
+  response. Never expose sensitive payloads in diagnostics or notifications.
+- A history-change hint arriving during a pending list/body request is currently
+  ignored and recovered by later reconciliation. Coalesce it as pending work and
+  query again after the current request completes. Repeated hints must not create
+  overlapping requests, duplicate rows or repeated downloads of cached bodies.
+
+Use independent status facts rather than one overloaded synchronization result:
+
+| Subject | Required meaning |
+| --- | --- |
+| Source query | Waiting, updating metadata, metadata checked, incomplete, unavailable, access denied or locally paused. Record freshness per source; one source's failure does not replace another's result. |
+| Item body | Metadata only, receiving, verified content available in the app, or unavailable/failed. Metadata receipt does not prove body reception. Status-only history does not start a body transfer. |
+| Phone clipboard action | Not requested, copying, verified copy, failed or unverified. App history reception does not change this fact. |
+| Live outgoing transfer | Sending, receiver-applied, failed, genuinely cancelled or unknown, independently for each compatible destination. A pull-only peer never enters this operation merely because sending permission is enabled. |
+
+Native UI and optional notifications must derive these meanings from shared SDK
+or application snapshots. They must not reconstruct authority or infer success
+from a timer, an authenticated connection or an item count. Backgrounding stops
+active history work; a later foreground session reconciles retained history and
+does not replay a phone send. Keep cached availability separate from remote
+freshness and current permission.
+
+The computer currently has no history-body acknowledgement proving that the phone
+validated and cached its response. Writing bytes to the connection cannot be
+presented as confirmed mobile reception. If the computer must display that
+confirmation, add a separately negotiated, bounded history-content
+acknowledgement after phone validation/cache acceptance. Its meaning is
+**available in the phone app**, never OS clipboard Applied; it must not create a
+durable offline-delivery ledger or reuse the live-clipboard receipt contract.
+The phone can report its own verified body reception using existing local
+evidence without this protocol addition.
+
+Acceptance must exercise metadata-before-body, already cached bodies, status-only
+history, a hint during an in-flight request, a source denying a body after listing,
+one failing source alongside a successful source, background interruption and
+mixed live/pull-only destinations. No case may show false cancellation, false
+body success or a silent phone clipboard write.
+
 ## Kernel and lower-layer change map
 
 The desktop baseline already has `EventId`, per-device/global policy, mutual TLS, a bidirectional session on the application port, local-copy history, an encrypted temporary image cache, and bounded receipt recovery. Its current network frame is strict v1, its history API is local to the daemon, and successful reception means an OS clipboard write. The mobile feature needs the following explicit changes; none is provided by native UI alone. Current code anchors: [model](../../crates/model/src/sync.rs), [core](../../crates/core/src/sync.rs), [application](../../crates/application/src/service.rs), [ports](../../crates/ports/src/sync.rs), [history cache](../../crates/adapters/src/recent.rs), [durable store](../../crates/adapters/src/storage.rs), [network](../../crates/adapters/src/network.rs), [discovery](../../crates/adapters/src/discovery.rs), and [local API](../../crates/api/src/control.rs).
