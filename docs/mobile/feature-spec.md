@@ -4,6 +4,8 @@ Status: implementation in progress; mobile protocol, app behavior and real-devic
 
 ## Goal and operating model
 
+The [mobile design brief](../design/mobile.md) is the designer-facing requirement source. Designers own navigation, layout, controls and detailed interactions; screen and action examples in this engineering specification are illustrative. Preserve explicit clipboard consent, independent device permissions and the other behavioral requirements when adapting the presentation.
+
 Shuttli on iPhone and Android lets a person briefly open the app, see recent retained copies from permitted computers in one history, and explicitly copy a chosen item to the phone clipboard. The person may also explicitly import a phone clipboard snapshot and send it to permitted computers. The first release supports text and supported images while the app is in the foreground. It uses the separately installed official Tailscale client, the existing Shuttli peer identity, and direct authenticated device connections. It requires no account, central clipboard server, QR code, or manually entered address.
 
 | Decision | First-release behavior |
