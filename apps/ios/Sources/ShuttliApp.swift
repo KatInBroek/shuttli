@@ -64,14 +64,17 @@ final class AppState: ObservableObject {
             connectionStatusKey = "tailscale_unavailable"
             return
         }
+        for (id, directions) in DevicePolicyStore.load() {
+            guard session.restoreDeviceDirections(peerId: id, send: directions.send, receive: directions.receive) else {
+                connectionStatusKey = "listener_unavailable"
+                return
+            }
+        }
         let error = session.startListener(
             identityBytes: identity,
             tailscaleIp: address,
             name: UIDevice.current.name
         )
-        for (id, directions) in DevicePolicyStore.load() {
-            _ = session.restoreDeviceDirections(peerId: id, send: directions.send, receive: directions.receive)
-        }
         connectionStatusKey = error.isEmpty ? "waiting_for_devices" : "listener_unavailable"
         updateSnapshot()
         refreshTask = Task { [weak self] in

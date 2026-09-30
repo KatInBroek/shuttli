@@ -53,6 +53,9 @@ Protect private identity/policy/cache files, exclude them from cloud backup/logs
 
 ## Independent tasks
 
+See the [Android test workflow](android-testing.md) for isolated emulator checks,
+opt-in real Tailscale tests and external device configuration.
+
 | ID | Acceptance |
 | --- | --- |
 | A01 | Real Android discovery from Linux without QR; authenticated traffic across networks, split-tunneling, denied policy and resume. |

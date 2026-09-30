@@ -100,13 +100,14 @@ class MobileAppState(private val app: Application) {
     private suspend fun connect() {
         val bytes = identity ?: run { post { it.copy(status = "identity_unavailable") }; return }
         val ip = TailnetAddress.currentIPv4(app) ?: run { post { it.copy(status = "tailscale_unavailable") }; return }
-        val error = session.startListener(bytes, ip, Build.MODEL.take(256))
-        if (error.isEmpty() && !policyRestored) {
-            DevicePolicyStore.load(app).forEach { (id, value) ->
+        if (!policyRestored) {
+            val restored = DevicePolicyStore.load(app).all { (id, value) ->
                 session.restoreDeviceDirections(id, value.send, value.receive)
             }
+            if (!restored) { post { it.copy(status = "listener_unavailable") }; return }
             policyRestored = true
         }
+        val error = session.startListener(bytes, ip, Build.MODEL.take(256))
         post { it.copy(status = if (error.isEmpty()) "waiting" else "listener_unavailable") }
     }
 

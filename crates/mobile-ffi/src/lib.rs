@@ -2,7 +2,7 @@
 //! authority tickets, TLS state and database handles remain in Rust.
 use shuttli_mobile_sdk::{
     HistoryMode, Identity, MobileHistory,
-    peers::PeerDirectory,
+    peers::{Directions, MAX_DIRECT_PEERS, PeerDirectory},
     transport::{MobileTransport, SendCommand, SendResults, SendState},
 };
 use shuttli_model::sync::{EventId, Format, Metadata};
@@ -130,6 +130,7 @@ fn now_ms() -> u64 {
 pub struct MobileSession {
     history: Arc<Mutex<MobileHistory>>,
     peers: Mutex<Option<Arc<Mutex<PeerDirectory>>>>,
+    saved_directions: Mutex<BTreeMap<shuttli_model::sync::DeviceId, Directions>>,
     listener: Mutex<Option<MobileTransport>>,
     results: SendResults,
     sequence: AtomicU64,
@@ -142,6 +143,7 @@ impl MobileSession {
         Self {
             history: Arc::new(Mutex::new(MobileHistory::default())),
             peers: Mutex::new(None),
+            saved_directions: Mutex::new(BTreeMap::new()),
             listener: Mutex::new(None),
             results: Arc::new(Mutex::new(BTreeMap::new())),
             sequence: AtomicU64::new(1),
@@ -202,7 +204,16 @@ impl MobileSession {
                     return "Device identity changed during this session".into();
                 }
             } else {
-                *slot = Some(Arc::new(Mutex::new(PeerDirectory::new(identity.id))));
+                let mut directory = PeerDirectory::new(identity.id);
+                for (&id, &directions) in self
+                    .saved_directions
+                    .lock()
+                    .expect("mobile consent lock")
+                    .iter()
+                {
+                    directory.restore_directions(id, directions);
+                }
+                *slot = Some(Arc::new(Mutex::new(directory)));
             }
             slot.as_ref().expect("directory created").clone()
         };
@@ -427,16 +438,23 @@ impl MobileSession {
         let Ok(id) = <[u8; 32]>::try_from(bytes) else {
             return false;
         };
-        self.peers
-            .lock()
-            .expect("mobile peers lock")
-            .as_ref()
-            .is_some_and(|peers| {
-                peers
-                    .lock()
-                    .expect("mobile directory lock")
-                    .restore_directions(id, shuttli_mobile_sdk::peers::Directions { send, receive })
-            })
+        let peers = self.peers.lock().expect("mobile peers lock");
+        let mut saved = self.saved_directions.lock().expect("mobile consent lock");
+        if saved.len() >= MAX_DIRECT_PEERS && !saved.contains_key(&id) {
+            return false;
+        }
+        let directions = Directions { send, receive };
+        if let Some(peers) = peers.as_ref() {
+            if !peers
+                .lock()
+                .expect("mobile directory lock")
+                .restore_directions(id, directions)
+            {
+                return false;
+            }
+        }
+        saved.insert(id, directions);
+        true
     }
 
     pub fn send_text(&self, text: String) -> u32 {
@@ -604,6 +622,49 @@ mod tests {
     use super::*;
     use shuttli_model::mobile::{HistoryListResponse, HistorySummary};
     use shuttli_model::sync::Metadata;
+
+    #[test]
+    fn saved_consent_is_installed_before_any_transport_starts() {
+        let session = MobileSession::new();
+        let id = [2; 32];
+        assert!(session.restore_device_directions(hex::encode(id), false, false));
+        assert!(!session.restore_device_directions("invalid".into(), true, true));
+        session.enter_foreground();
+        let bytes = generate_identity_bytes();
+        // A non-tailnet bind fails, but the directory has already been prepared.
+        assert!(
+            !session
+                .start_listener(bytes, "127.0.0.1".into(), "Phone".into())
+                .is_empty()
+        );
+        let slot = session.peers.lock().unwrap();
+        let mut directory = slot.as_ref().unwrap().lock().unwrap();
+        directory
+            .observed_direct(
+                id,
+                "Computer".into(),
+                "100.100.100.2:45987".into(),
+                shuttli_model::mobile::Capabilities::desktop(),
+            )
+            .unwrap();
+        assert_eq!(
+            directory.direct()[0].directions,
+            Directions {
+                send: false,
+                receive: false
+            }
+        );
+        drop(directory);
+        drop(slot);
+        assert!(session.restore_device_directions(hex::encode(id), true, false));
+        assert!(session.device_rows()[0].send);
+        assert!(!session.device_rows()[0].receive);
+        for n in 3..=33 {
+            assert!(session.restore_device_directions(hex::encode([n; 32]), false, false));
+        }
+        assert!(!session.restore_device_directions(hex::encode([34; 32]), true, true));
+        assert!(session.restore_device_directions(hex::encode(id), false, false));
+    }
 
     #[test]
     fn native_bridge_preserves_one_session_across_lifecycle() {

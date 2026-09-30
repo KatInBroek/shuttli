@@ -18,7 +18,8 @@ adb install -r apps/android/app/build/outputs/apk/debug/app-debug.apk
 adb install -r apps/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb install -r apps/android/paste-probe/build/outputs/apk/debug/paste-probe-debug.apk
 
-result=$(adb shell am instrument -w org.katinbroek.shuttli.test/androidx.test.runner.AndroidJUnitRunner)
+result=$(adb shell am instrument -w -e class org.katinbroek.shuttli.MobileInstrumentedTest \
+  org.katinbroek.shuttli.test/androidx.test.runner.AndroidJUnitRunner)
 [[ $result == *'OK (4 tests)'* ]] || { echo "$result"; exit 1; }
 printf '%s\n' "$result"
 
