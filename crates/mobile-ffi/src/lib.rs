@@ -21,7 +21,7 @@ uniffi::setup_scaffolding!();
 
 #[uniffi::export]
 pub fn sdk_api_version() -> u32 {
-    5
+    6
 }
 
 #[derive(Clone, uniffi::Enum)]
@@ -111,6 +111,9 @@ pub struct MobileDeviceRow {
     pub history_activity: MobileHistoryActivity,
     pub checked_at_ms: u64,
     pub history_partial: bool,
+    pub text: bool,
+    pub image: bool,
+    pub endpoint: String,
 }
 
 #[derive(Clone, uniffi::Enum)]
@@ -413,6 +416,9 @@ impl MobileSession {
                             history_activity: activity,
                             checked_at_ms: freshness.map_or(0, |s| s.checked_at_ms),
                             history_partial: freshness.is_some_and(|s| s.partial),
+                            text: peer.directions.text,
+                            image: peer.directions.image,
+                            endpoint: peer.endpoint,
                         }
                     })
                     .collect()
@@ -479,7 +485,32 @@ impl MobileSession {
             })
     }
 
+    pub fn identity_fingerprint(&self, identity_bytes: Vec<u8>) -> String {
+        Identity::from_bytes(&identity_bytes)
+            .map_or_else(|_| String::new(), |identity| hex::encode(identity.id))
+    }
+
+    pub fn request_history_refresh(&self) -> bool {
+        if let Some(listener) = self.listener.lock().expect("mobile listener lock").as_ref() {
+            listener.request_refresh();
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn restore_device_directions(&self, peer_id: String, send: bool, receive: bool) -> bool {
+        self.restore_device_policy(peer_id, send, receive, true, true)
+    }
+
+    pub fn restore_device_policy(
+        &self,
+        peer_id: String,
+        send: bool,
+        receive: bool,
+        text: bool,
+        image: bool,
+    ) -> bool {
         let Ok(bytes) = hex::decode(peer_id) else {
             return false;
         };
@@ -491,7 +522,12 @@ impl MobileSession {
         if saved.len() >= MAX_DIRECT_PEERS && !saved.contains_key(&id) {
             return false;
         }
-        let directions = Directions { send, receive };
+        let directions = Directions {
+            send,
+            receive,
+            text,
+            image,
+        };
         if let Some(peers) = peers.as_ref() {
             if !peers
                 .lock()
@@ -607,7 +643,7 @@ impl MobileSession {
         let targets: Vec<_> = directory
             .direct()
             .into_iter()
-            .filter(|p| p.online && p.directions.send)
+            .filter(|p| p.online && p.directions.send && p.directions.allows(format))
             .collect();
         if targets.is_empty() {
             return 0;
@@ -699,7 +735,8 @@ mod tests {
             directory.direct()[0].directions,
             Directions {
                 send: false,
-                receive: false
+                receive: false,
+                ..Directions::default()
             }
         );
         drop(directory);
@@ -715,9 +752,44 @@ mod tests {
     }
 
     #[test]
+    fn native_ui_identity_and_content_policy_use_authenticated_identity() {
+        let session = MobileSession::new();
+        let (identity, bytes) = Identity::generate().unwrap();
+        assert_eq!(
+            session.identity_fingerprint(bytes.clone()),
+            hex::encode(identity.id)
+        );
+        assert!(session.identity_fingerprint(vec![]).is_empty());
+        assert!(!session.request_history_refresh());
+        let id = [2; 32];
+        assert!(session.restore_device_policy(hex::encode(id), true, false, false, true));
+        session.enter_foreground();
+        let _ = session.start_listener(bytes, "127.0.0.1".into(), "Phone".into());
+        let peers = session.peers.lock().unwrap().as_ref().unwrap().clone();
+        peers
+            .lock()
+            .unwrap()
+            .observed_direct(
+                id,
+                "Device".into(),
+                "100.64.0.2:45987".into(),
+                shuttli_model::mobile::Capabilities::desktop(),
+            )
+            .unwrap();
+        let row = session.device_rows().pop().unwrap();
+        assert!(row.send && row.image);
+        assert!(!row.receive && !row.text);
+        assert_eq!(row.endpoint, "100.64.0.2:45987");
+        assert!(session.set_receive(hex::encode(id), true));
+        assert!(session.set_send(hex::encode(id), false));
+        let row = session.device_rows().pop().unwrap();
+        assert!(!row.send && row.receive && !row.text && row.image);
+    }
+
+    #[test]
     fn native_bridge_preserves_one_session_across_lifecycle() {
         let session = MobileSession::new();
-        assert_eq!(sdk_api_version(), 5);
+        assert_eq!(sdk_api_version(), 6);
         let first = session.enter_foreground();
         session.enter_background();
         assert!(session.enter_foreground() > first);

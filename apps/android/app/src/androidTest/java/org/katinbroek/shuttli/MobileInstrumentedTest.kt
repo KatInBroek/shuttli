@@ -7,6 +7,9 @@ import android.util.Log
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performScrollTo
 import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -34,8 +37,50 @@ class MobileInstrumentedTest {
         rule.onNodeWithText(original).assertExists()
         assertEquals(original, clipboard.primaryClip?.getItemAt(0)?.text?.toString())
         assertTrue((activity.application as ShuttliApplication).mobileState.snapshot.transfers.isEmpty())
-        rule.onNodeWithText(activity.getString(R.string.history)).performClick()
-        rule.onNodeWithText(activity.getString(R.string.history_empty)).assertExists()
+        rule.onNodeWithText(activity.getString(R.string.history)).assertExists()
+        assertTrue((activity.application as ShuttliApplication).mobileState.snapshot.history.none { it.isLocal })
+    }
+
+    @Test fun threeTabsKeepTheSendPanelOnlyOnHome() {
+        val activity = rule.activity
+        rule.onNodeWithText(activity.getString(R.string.paste_clipboard)).assertExists()
+        rule.onNodeWithText(activity.getString(R.string.devices)).performClick()
+        rule.onNodeWithText(activity.getString(R.string.paste_clipboard)).assertDoesNotExist()
+        rule.onNodeWithText(activity.getString(R.string.settings)).performClick()
+        rule.onNodeWithText(activity.getString(R.string.paste_clipboard)).assertDoesNotExist()
+        rule.onNodeWithText(activity.getString(R.string.this_phone)).assertExists()
+        rule.onNodeWithText(activity.getString(R.string.home)).performClick()
+        rule.onNodeWithText(activity.getString(R.string.paste_clipboard)).assertExists()
+    }
+
+    @Test fun draftIsFrozenUntilCancelledAndOfflineSendIsDisabled() {
+        val activity = rule.activity
+        val state = (activity.application as ShuttliApplication).mobileState
+        val clipboard = activity.getSystemService(ClipboardManager::class.java)
+        rule.runOnUiThread { clipboard.setPrimaryClip(ClipData.newPlainText("fixture", "frozen first copy")) }
+        rule.onNodeWithText(activity.getString(R.string.paste_clipboard)).performClick()
+        rule.waitUntil(5000) { state.snapshot.draft is Draft.Text }
+        rule.runOnUiThread { clipboard.setPrimaryClip(ClipData.newPlainText("fixture", "later copy")) }
+        rule.onNodeWithText("frozen first copy").assertExists()
+        assertEquals("frozen first copy", (state.snapshot.draft as Draft.Text).value)
+        rule.onNodeWithText(activity.getString(R.string.send_to_devices)).assertIsNotEnabled()
+        rule.onNodeWithContentDescription(activity.getString(R.string.cancel)).performClick()
+        rule.waitUntil(5000) { state.snapshot.draft == null }
+        assertEquals("later copy", clipboard.primaryClip?.getItemAt(0)?.text?.toString())
+        assertTrue(state.snapshot.transfers.isEmpty())
+    }
+
+    @Test fun targetsAreReadOnlyAndClearRequiresConfirmation() {
+        val activity = rule.activity
+        rule.onNodeWithText(activity.getString(R.string.devices_can_receive, 0)).performClick()
+        rule.onNodeWithText(activity.getString(R.string.targets_help)).assertExists()
+        rule.onNodeWithText(activity.getString(R.string.done)).performClick()
+        rule.onNodeWithText(activity.getString(R.string.settings)).performClick()
+        rule.onNodeWithText(activity.getString(R.string.clear_history)).performScrollTo().performClick()
+        rule.onNodeWithText(activity.getString(R.string.clear_history_help)).assertExists()
+        rule.onNodeWithText(activity.getString(R.string.cancel)).performClick()
+        rule.onNodeWithText(activity.getString(R.string.clear_history_help)).assertDoesNotExist()
+        rule.onNodeWithText(activity.getString(R.string.app_version, BuildConfig.VERSION_NAME)).performScrollTo().assertExists()
     }
 
     @Test fun exportedImageStaysReadableAfterHistoryClear() {

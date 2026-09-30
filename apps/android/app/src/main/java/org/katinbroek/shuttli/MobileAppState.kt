@@ -47,7 +47,9 @@ internal data class UiSnapshot(
     val selected: MobileHistoryRow? = null,
     val preview: ByteArray? = null,
     val historyMode: MobileHistoryMode = MobileHistoryMode.CONTENT,
-    val historyLimit: Int = 20
+    val historyLimit: Int = 20,
+    val fingerprint: String = "",
+    val actionEvent: String? = null
 )
 
 class MobileAppState(private val app: Application) {
@@ -73,6 +75,8 @@ class MobileAppState(private val app: Application) {
                 post { it.copy(historyMode = settings.mode, historyLimit = settings.limit) }
                 session.enterForeground()
                 identity = DeviceIdentityStore.loadOrCreate(app)
+                val fingerprint = identity?.let(session::identityFingerprint).orEmpty()
+                post { it.copy(fingerprint = fingerprint) }
                 connect()
                 refreshJob = scope.launch {
                     while (active) {
@@ -102,7 +106,7 @@ class MobileAppState(private val app: Application) {
         val ip = TailnetAddress.currentIPv4(app) ?: run { post { it.copy(status = "tailscale_unavailable") }; return }
         if (!policyRestored) {
             val restored = DevicePolicyStore.load(app).all { (id, value) ->
-                session.restoreDeviceDirections(id, value.send, value.receive)
+                session.restoreDevicePolicy(id, value.send, value.receive, value.text, value.image)
             }
             if (!restored) { post { it.copy(status = "listener_unavailable") }; return }
             policyRestored = true
@@ -124,13 +128,31 @@ class MobileAppState(private val app: Application) {
         snapshot = change(snapshot)
     }
 
-    fun setDirections(row: MobileDeviceRow, send: Boolean = row.send, receive: Boolean = row.receive) {
+    fun setDirections(row: MobileDeviceRow, send: Boolean? = null, receive: Boolean? = null,
+                      text: Boolean? = null, image: Boolean? = null) {
         scope.launch {
-            if (!DevicePolicyStore.save(app, row.id, Directions(send, receive))) {
-                post { it.copy(actionStatus = "policy_failed") }
-                return@launch
+            lifecycle.withLock {
+                val previous = DevicePolicyStore.load(app)[row.id] ?: Directions(row.send, row.receive, row.text, row.image)
+                val value = Directions(send ?: previous.send, receive ?: previous.receive, text ?: previous.text, image ?: previous.image)
+                if (!DevicePolicyStore.save(app, row.id, value)) {
+                    post { it.copy(actionStatus = "policy_failed") }; return@withLock
+                }
+                if (!session.restoreDevicePolicy(row.id, value.send, value.receive, value.text, value.image)) {
+                    DevicePolicyStore.save(app, row.id, previous)
+                    post { it.copy(actionStatus = "policy_failed") }; return@withLock
+                }
+                post { it.copy(actionStatus = null) }
+                session.requestHistoryRefresh()
+                refresh()
             }
-            session.restoreDeviceDirections(row.id, send, receive)
+        }
+    }
+
+    fun refreshHistory() {
+        scope.launch {
+            connect()
+            if (!session.requestHistoryRefresh()) post { it.copy(actionStatus = "refresh_unavailable") }
+            else post { it.copy(actionStatus = null) }
             refresh()
         }
     }
@@ -243,8 +265,16 @@ class MobileAppState(private val app: Application) {
                     it.readBytesBounded(8 * 1024 * 1024)?.contentEquals(bytes)
                 } == true
             }
-            post { it.copy(actionStatus = if (copied) "copied_to_phone" else "copy_uncertain") }
+            post { it.copy(actionStatus = if (copied) "copied_to_phone" else "copy_uncertain", actionEvent = row.eventKey) }
         }
+    }
+
+    internal suspend fun historyPreview(row: MobileHistoryRow): ByteArray? = withContext(Dispatchers.IO) {
+        if (!row.available) null else session.historyBody(row.eventKey).takeIf(ByteArray::isNotEmpty)
+    }
+
+    fun dismissDraft() {
+        scope.launch { post { it.copy(draft = null, actionStatus = null) } }
     }
 
     fun selectHistory(row: MobileHistoryRow?) {

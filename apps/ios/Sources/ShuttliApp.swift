@@ -29,6 +29,7 @@ struct ShuttliApp: App {
 
 @MainActor
 final class AppState: ObservableObject {
+    @Published private(set) var fingerprint = ""
     @Published private(set) var draft: String?
     @Published private(set) var imageDraft: Data?
     @Published private(set) var historyCount: UInt32 = 0
@@ -60,12 +61,13 @@ final class AppState: ObservableObject {
             connectionStatusKey = "identity_unavailable"
             return
         }
+        fingerprint = session.identityFingerprint(identityBytes: identity)
         guard let address = TailnetAddress.currentIPv4() else {
             connectionStatusKey = "tailscale_unavailable"
             return
         }
         for (id, directions) in DevicePolicyStore.load() {
-            guard session.restoreDeviceDirections(peerId: id, send: directions.send, receive: directions.receive) else {
+            guard session.restoreDevicePolicy(peerId: id, send: directions.send, receive: directions.receive, text: directions.text, image: directions.image) else {
                 connectionStatusKey = "listener_unavailable"
                 return
             }
@@ -128,9 +130,28 @@ final class AppState: ObservableObject {
         }
     }
 
+    func refreshHistory() {
+        if !session.requestHistoryRefresh() { settingsStatusKey = "refresh_unavailable" }
+        else { settingsStatusKey = nil }
+        updateSnapshot()
+    }
+
+    func setContentTypes(for row: MobileDeviceRow, text: Bool? = nil, image: Bool? = nil) {
+        let value = DevicePolicyStore.load()[row.id] ?? DeviceDirections(send: row.send, receive: row.receive, text: row.text, image: row.image)
+        guard DevicePolicyStore.save(id: row.id, send: value.send, receive: value.receive, text: text ?? value.text, image: image ?? value.image),
+              session.restoreDevicePolicy(peerId: row.id, send: value.send, receive: value.receive, text: text ?? value.text, image: image ?? value.image) else {
+            settingsStatusKey = "settings_unavailable"; return
+        }
+        settingsStatusKey = nil
+        _ = session.requestHistoryRefresh()
+        updateSnapshot()
+    }
+
     func setReceive(_ enabled: Bool, for row: MobileDeviceRow) {
         if DevicePolicyStore.save(id: row.id, send: row.send, receive: enabled) {
             _ = session.setReceive(peerId: row.id, enabled: enabled)
+            settingsStatusKey = nil
+            _ = session.requestHistoryRefresh()
         } else {
             settingsStatusKey = "settings_unavailable"
         }
@@ -140,6 +161,7 @@ final class AppState: ObservableObject {
     func setSend(_ enabled: Bool, for row: MobileDeviceRow) {
         if DevicePolicyStore.save(id: row.id, send: enabled, receive: row.receive) {
             _ = session.setSend(peerId: row.id, enabled: enabled)
+            settingsStatusKey = nil
         } else {
             settingsStatusKey = "settings_unavailable"
         }
@@ -170,8 +192,18 @@ final class AppState: ObservableObject {
         updateSnapshot()
     }
 
+    var sendTargets: [MobileDeviceRow] {
+        deviceRows.filter { $0.online && $0.send && (imageDraft != nil ? $0.image : draft != nil ? $0.text : $0.text || $0.image) }
+    }
+
     var allowedSendCount: Int {
-        deviceRows.filter { $0.online && $0.send }.count
+        sendTargets.count
+    }
+
+    func dismissDraft() {
+        draft = nil
+        imageDraft = nil
+        sendStatusKey = nil
     }
 
     func sendDraft() {

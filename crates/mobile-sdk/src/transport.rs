@@ -36,6 +36,7 @@ pub struct MobileTransport {
     epoch: [u8; 16],
     stop: watch::Sender<bool>,
     commands: mpsc::Sender<SendCommand>,
+    refresh: watch::Sender<u64>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -80,6 +81,7 @@ impl MobileTransport {
         getrandom::getrandom(&mut epoch).map_err(|e| e.to_string())?;
         let (stop, receiver) = watch::channel(false);
         let (commands, command_rx) = mpsc::channel(16);
+        let (refresh, refresh_rx) = watch::channel(0);
         let context = SessionContext {
             identity: Arc::new(identity),
             name,
@@ -89,6 +91,7 @@ impl MobileTransport {
             results,
             routes: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
             stop: receiver.clone(),
+            refresh: refresh_rx,
         };
         let thread = std::thread::Builder::new()
             .name("shuttli-mobile".into())
@@ -105,6 +108,7 @@ impl MobileTransport {
             epoch,
             stop,
             commands,
+            refresh,
             thread: Some(thread),
         })
     }
@@ -115,6 +119,12 @@ impl MobileTransport {
 
     pub fn enqueue(&self, command: SendCommand) -> bool {
         self.commands.try_send(command).is_ok()
+    }
+
+    /// Coalesce refresh requests without resetting sessions or interrupting sends.
+    pub fn request_refresh(&self) {
+        self.refresh
+            .send_modify(|revision| *revision = revision.wrapping_add(1));
     }
 
     pub fn stop(&mut self) {
@@ -196,6 +206,7 @@ struct SessionContext {
     results: SendResults,
     routes: Arc<tokio::sync::Mutex<BTreeMap<DeviceId, mpsc::Sender<SendCommand>>>>,
     stop: watch::Receiver<bool>,
+    refresh: watch::Receiver<u64>,
 }
 
 async fn accept_desktop(
@@ -418,6 +429,8 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
     let history = &context.history;
     let peers = &context.peers;
     let mut stop = context.stop.clone();
+    let mut requested = context.refresh.clone();
+    let mut refresh_notifications = true;
     let mut pending_list = false;
     let mut pending_body: Option<EventId> = None;
     let mut body_queue = VecDeque::new();
@@ -472,6 +485,9 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
             request_started = Instant::now();
         }
         tokio::select! {
+            notification = requested.changed(), if refresh_notifications => {
+                if notification.is_ok() { refresh_needed = true; } else { refresh_notifications = false; }
+            }
             _ = stop.changed() => { if *stop.borrow() { return Ok(()); } }
             command = commands.recv(), if !pending_list && pending_body.is_none() && deferred_command.is_none() => {
                 deferred_command = command;
@@ -500,7 +516,7 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                         next_cursor = next;
                         let page = shuttli_model::mobile::HistoryListResponse { source_epoch: page_epoch, revision, items, next };
                         let wants_body = history.lock().map_err(|_| "history unavailable")?.wants_body();
-                        let candidates: Vec<_> = page.items.iter().filter(|i| i.body_available && wants_body)
+                        let candidates: Vec<_> = page.items.iter().filter(|i| i.body_available && wants_body && content_allowed(context, source, i.metadata.format))
                             .map(|i| (i.event, i.metadata.size)).collect();
                         {
                             let mut cache = history.lock().map_err(|_| "history unavailable")?;
@@ -536,7 +552,7 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                         let mut bytes = vec![0; metadata.size as usize];
                         timeout(Duration::from_secs(20), stream.read_exact(&mut bytes))
                             .await.map_err(|_| "history body timeout")?.map_err(|e| e.to_string())?;
-                        if can_query(context, source) && history.lock().map_err(|_| "history unavailable")?.wants_body() {
+                        if can_query(context, source) && content_allowed(context, source, metadata.format) && history.lock().map_err(|_| "history unavailable")?.wants_body() {
                             if history.lock().map_err(|_| "history unavailable")?.timeline()
                                 .iter().find(|row| row.summary.event == event)
                                 .is_none_or(|row| row.summary.metadata != metadata) {
@@ -600,12 +616,23 @@ fn can_query(context: &SessionContext, source: DeviceId) -> bool {
             .is_some_and(|history| history.query_enabled())
 }
 
-fn permitted_to_send(context: &SessionContext, target: DeviceId) -> bool {
+fn content_allowed(context: &SessionContext, source: DeviceId, format: Format) -> bool {
     context.peers.lock().ok().is_some_and(|directory| {
         directory
             .direct()
             .iter()
-            .any(|peer| peer.id == target && peer.online && peer.directions.send)
+            .any(|peer| peer.id == source && peer.directions.allows(format))
+    })
+}
+
+fn permitted_to_send(context: &SessionContext, target: DeviceId, format: Format) -> bool {
+    context.peers.lock().ok().is_some_and(|directory| {
+        directory.direct().iter().any(|peer| {
+            peer.id == target
+                && peer.online
+                && peer.directions.send
+                && peer.directions.allows(format)
+        })
     })
 }
 
@@ -645,7 +672,7 @@ async fn send_offer<S: AsyncRead + AsyncWrite + Unpin>(
     if command.event.origin != context.identity.id
         || command.event.epoch != context.epoch
         || command.event.seq == 0
-        || !permitted_to_send(context, command.target)
+        || !permitted_to_send(context, command.target, command.metadata.format)
         || command.metadata.size != command.body.len() as u64
         || command.metadata.size == 0
         || command.metadata.size > 8 * 1024 * 1024
@@ -672,7 +699,7 @@ async fn send_offer<S: AsyncRead + AsyncWrite + Unpin>(
         results.insert((command.event, command.target), SendState::Sending);
     }
     for chunk in command.body.chunks(65_536) {
-        if !permitted_to_send(context, command.target) {
+        if !permitted_to_send(context, command.target, command.metadata.format) {
             return Err("send permission changed".into());
         }
         stream.write_all(chunk).await.map_err(|e| e.to_string())?;
@@ -850,6 +877,7 @@ mod tests {
             results: Arc::new(Mutex::new(BTreeMap::new())),
             routes: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
             stop,
+            refresh: watch::channel(0).1,
         };
         let (old, _) = mpsc::channel(8);
         let (current, _) = mpsc::channel(8);
@@ -914,6 +942,7 @@ mod tests {
             results: Arc::new(Mutex::new(BTreeMap::new())),
             routes: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
             stop,
+            refresh: watch::channel(0).1,
         };
         assert!(can_query(&context, source));
         peers
@@ -924,6 +953,7 @@ mod tests {
                 crate::peers::Directions {
                     send: false,
                     receive: false,
+                    ..crate::peers::Directions::default()
                 },
             )
             .unwrap();
@@ -970,6 +1000,7 @@ mod tests {
             )
             .unwrap();
         let (stop, receiver) = watch::channel(false);
+        let (requested, refresh_rx) = watch::channel(0u64);
         let (mut phone, mut desktop) = tokio::io::duplex(65_536);
         let (command_sender, commands) = mpsc::channel(8);
         let context = SessionContext {
@@ -981,6 +1012,7 @@ mod tests {
             results: Arc::new(Mutex::new(BTreeMap::new())),
             routes: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
             stop: receiver,
+            refresh: refresh_rx,
         };
         let session = tokio::spawn(async move {
             mobile_session(&mut phone, source, epoch, generation, &context, commands).await
@@ -1100,6 +1132,101 @@ mod tests {
         .await
         .unwrap();
         assert!(history.lock().unwrap().body_available(event));
+        // UI refresh bypasses the 15-second timer and preserves cached data.
+        peers
+            .lock()
+            .unwrap()
+            .directions(
+                source,
+                crate::peers::Directions {
+                    text: false,
+                    ..crate::peers::Directions::default()
+                },
+            )
+            .unwrap();
+        requested.send_modify(|r| *r += 1);
+        assert!(matches!(
+            timeout(Duration::from_secs(1), read_frame(&mut desktop))
+                .await
+                .unwrap()
+                .unwrap(),
+            FrameV2::HistoryListRequest { .. }
+        ));
+        let blocked = EventId { seq: 2, ..event };
+        let summary = HistorySummary {
+            event: blocked,
+            metadata: Metadata {
+                format: Format::Text,
+                size: bytes.len() as u64,
+                digest: shuttli_content::canonical_digest(Format::Text, bytes).unwrap(),
+            },
+            copied_at_ms: 2,
+            body_available: true,
+        };
+        write_frame(
+            &mut desktop,
+            &FrameV2::HistoryListResponse {
+                source_epoch: epoch,
+                revision: 4,
+                items: vec![summary.clone()],
+                next: None,
+            },
+        )
+        .await
+        .unwrap();
+        timeout(Duration::from_secs(1), async {
+            while history.lock().unwrap().timeline().len() < 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!history.lock().unwrap().body_available(blocked));
+        assert!(history.lock().unwrap().body_available(event));
+        peers
+            .lock()
+            .unwrap()
+            .directions(source, crate::peers::Directions::default())
+            .unwrap();
+        requested.send_modify(|r| *r += 1);
+        assert!(matches!(
+            timeout(Duration::from_secs(1), read_frame(&mut desktop))
+                .await
+                .unwrap()
+                .unwrap(),
+            FrameV2::HistoryListRequest { .. }
+        ));
+        write_frame(
+            &mut desktop,
+            &FrameV2::HistoryListResponse {
+                source_epoch: epoch,
+                revision: 4,
+                items: vec![summary.clone()],
+                next: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(read_frame(&mut desktop).await.unwrap(), FrameV2::HistoryGet { event: e } if e == blocked)
+        );
+        write_frame(
+            &mut desktop,
+            &FrameV2::HistoryBody {
+                event: blocked,
+                metadata: summary.metadata,
+            },
+        )
+        .await
+        .unwrap();
+        desktop.write_all(bytes).await.unwrap();
+        timeout(Duration::from_secs(1), async {
+            while !history.lock().unwrap().body_available(blocked) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
         stop.send(true).unwrap();
         assert!(session.await.unwrap().is_ok());
         drop(command_sender);
@@ -1147,6 +1274,7 @@ mod tests {
             results: Arc::new(Mutex::new(BTreeMap::new())),
             routes: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
             stop,
+            refresh: watch::channel(0).1,
         };
         let (mut phone, mut desktop) = tokio::io::duplex(1024);
         assert_eq!(
@@ -1161,6 +1289,34 @@ mod tests {
                 crate::peers::Directions {
                     send: true,
                     receive: true,
+                    ..crate::peers::Directions::default()
+                },
+            )
+            .unwrap();
+        peers
+            .lock()
+            .unwrap()
+            .directions(
+                source,
+                crate::peers::Directions {
+                    send: true,
+                    text: false,
+                    ..crate::peers::Directions::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            send_offer(&mut phone, &command, &context).await.unwrap(),
+            SendState::Failed
+        );
+        peers
+            .lock()
+            .unwrap()
+            .directions(
+                source,
+                crate::peers::Directions {
+                    send: true,
+                    ..crate::peers::Directions::default()
                 },
             )
             .unwrap();

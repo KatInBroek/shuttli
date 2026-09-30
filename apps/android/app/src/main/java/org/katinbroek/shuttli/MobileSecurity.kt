@@ -58,7 +58,7 @@ internal object DeviceIdentityStore {
     }.getOrNull()
 }
 
-internal data class Directions(val send: Boolean, val receive: Boolean)
+internal data class Directions(val send: Boolean, val receive: Boolean, val text: Boolean = true, val image: Boolean = true)
 
 internal object DevicePolicyStore {
     fun load(context: Context): Map<String, Directions> = runCatching {
@@ -73,7 +73,7 @@ internal object DevicePolicyStore {
             val id = keys.next()
             if (!id.matches(Regex("[0-9a-f]{64}"))) continue
             val item = source.getJSONObject(id)
-            map[id] = Directions(item.getBoolean("send"), item.getBoolean("receive"))
+            map[id] = Directions(item.getBoolean("send"), item.getBoolean("receive"), item.optBoolean("text", true), item.optBoolean("image", true))
         }
         map.takeIf { it.size <= 32 } ?: emptyMap()
     }.getOrDefault(emptyMap())
@@ -84,7 +84,7 @@ internal object DevicePolicyStore {
         all[id] = directions
         if (all.size > 32) return false
         val json = JSONObject()
-        all.forEach { (key, value) -> json.put(key, JSONObject().put("send", value.send).put("receive", value.receive)) }
+        all.forEach { (key, value) -> json.put(key, JSONObject().put("send", value.send).put("receive", value.receive).put("text", value.text).put("image", value.image)) }
         val bytes = json.toString().toByteArray(Charsets.UTF_8)
         if (bytes.size > 16384) return false
         val file = AtomicFile(context.noBackupFilesDir.resolve("device-directions-v1"))

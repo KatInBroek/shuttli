@@ -2,7 +2,7 @@
 //! direct observations and roster sources to mutually authenticated TLS peers.
 use shuttli_model::{
     mobile::{Capabilities, PeerHint, PeerList},
-    sync::DeviceId,
+    sync::{DeviceId, Format},
 };
 use shuttli_protocol::{valid_endpoint, valid_peer_list};
 use std::collections::BTreeMap;
@@ -14,6 +14,8 @@ pub const MAX_DIRECT_PEERS: usize = 32;
 pub struct Directions {
     pub send: bool,
     pub receive: bool,
+    pub text: bool,
+    pub image: bool,
 }
 
 impl Default for Directions {
@@ -21,6 +23,17 @@ impl Default for Directions {
         Self {
             send: false,
             receive: true,
+            text: true,
+            image: true,
+        }
+    }
+}
+
+impl Directions {
+    pub fn allows(&self, format: Format) -> bool {
+        match format {
+            Format::Text => self.text,
+            Format::Png => self.image,
         }
     }
 }
@@ -297,6 +310,7 @@ mod tests {
                 Directions {
                     send: true,
                     receive: false,
+                    ..Directions::default()
                 },
             )
             .unwrap();
@@ -338,7 +352,8 @@ mod tests {
             directory.direct()[0].directions,
             Directions {
                 send: true,
-                receive: false
+                receive: false,
+                ..Directions::default()
             }
         );
     }
@@ -351,7 +366,8 @@ mod tests {
             id,
             Directions {
                 send: true,
-                receive: false
+                receive: false,
+                ..Directions::default()
             }
         ));
         assert!(directory.direct().is_empty());
@@ -359,7 +375,8 @@ mod tests {
             [1; 32],
             Directions {
                 send: true,
-                receive: true
+                receive: true,
+                ..Directions::default()
             }
         ));
         directory
@@ -387,7 +404,8 @@ mod tests {
                 .directions,
             Directions {
                 send: true,
-                receive: false
+                receive: false,
+                ..Directions::default()
             }
         );
         assert_eq!(

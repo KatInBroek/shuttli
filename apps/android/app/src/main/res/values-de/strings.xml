@@ -1,24 +1,107 @@
 <resources>
-<string name="home">Start</string><string name="history">Verlauf</string><string name="devices">Geräte</string><string name="settings">Einstellungen</string>
-<string name="connect_help">App öffnen, während Tailscale verbunden ist. Ein erlaubter Computer findet dieses Telefon.</string><string name="waiting_for_devices">Warten auf Geräte</string><string name="devices_connected">Mit %1$d Geräten verbunden</string>
-<string name="tailscale_unavailable">Tailscale verbinden, um von Computern zu empfangen</string><string name="identity_unavailable">Geräteidentität nicht verfügbar</string><string name="listener_unavailable">Verbindung konnte nicht gestartet werden</string>
-<string name="send_from_phone">Von diesem Telefon senden</string><string name="manual_clipboard_help">Einfügen und Senden benötigen getrennte Aktionen. Empfangener Verlauf ändert die Zwischenablage erst nach Kopieren.</string><string name="paste_clipboard">Aus Zwischenablage einfügen</string><string name="image_draft">Bild bereit (%1$d Bytes)</string><string name="send_to_devices">An Geräte senden</string><string name="recent_history">Letzter Verlauf</string><string name="history_empty">Keine aktuellen Kopien</string>
-<string name="all">Alle</string><string name="from_devices">Von Geräten</string><string name="sent_from_phone">Vom Telefon</string><string name="text_item">Text</string><string name="image_item">Bild</string><string name="this_phone">Dieses Telefon</string><string name="item_available">In App verfügbar</string><string name="item_listed">Aufgelistet; Inhalt nicht verfügbar</string>
-<string name="back">Zurück</string><string name="bytes">%1$d Bytes</string><string name="content_unavailable">Inhalt nicht mehr verfügbar</string><string name="preview_unavailable">Vorschau nicht verfügbar</string><string name="copy_to_phone">Auf dieses Telefon kopieren</string><string name="send_again">Erneut senden</string>
-<string name="no_connected_devices">Keine verbundenen Geräte</string><string name="device_online">Online</string><string name="device_offline">Offline</string><string name="receive_from_device">Von diesem Gerät empfangen</string><string name="send_to_device">Senden an dieses Gerät erlauben</string><string name="device_consent_help">Ein Gerät mit Sendeberechtigung kann auch ältere gespeicherte Kopien bereitstellen. Senden vom Telefon erfordert eine eigene Aktion.</string>
-<string name="privacy">Datenschutz</string><string name="clear_history">Lokalen Verlauf löschen</string><string name="clear_history_help">Dies löscht den Cache des Telefons. Erlaubte Computer können Kopien erneut bereitstellen. Ein Bild in der Systemzwischenablage bleibt kurz nutzbar.</string><string name="clear">Löschen</string><string name="cancel">Abbrechen</string><string name="history_count">%1$d Einträge im Verlauf</string>
-<string name="send_queued">Senden an erlaubte Geräte</string><string name="no_send_targets">Senden an mindestens ein verbundenes Gerät erlauben</string><string name="unsupported_image">Bild zu groß oder nicht unterstützt</string><string name="unsupported_text">Text zu groß oder nicht unterstützt</string><string name="unsupported_clipboard">Inhalt der Zwischenablage nicht unterstützt</string><string name="copied_to_phone">Auf dieses Telefon kopiert</string><string name="copy_uncertain">Kopie nicht bestätigt</string><string name="policy_failed">Geräteberechtigung konnte nicht gespeichert werden</string>
-<string name="transfer_queued">Warteschlange</string><string name="transfer_sending">Wird gesendet</string><string name="transfer_applied">Auf Gerät angewendet</string><string name="transfer_failed">Fehlgeschlagen</string><string name="transfer_unknown">Ergebnis unbekannt</string>
-<string name="history_mode">Verlaufsmodus</string><string name="history_off">Aus</string><string name="history_status">Nur Status</string><string name="history_content">Inhalt</string><string name="history_limit">Maximale Einträge</string><string name="apply_history_limit">Limit übernehmen</string><string name="history_limit_help">0–10.000 Einträge. Null beendet Verlaufsabfragen; Bild- und Speichergrenzen gelten weiter.</string><string name="settings_failed">Verlaufseinstellungen konnten nicht gespeichert werden</string>
-<string name="app_version">App-Version: %1$s</string>
-<string name="history_waiting">Warten auf Verlauf</string>
-<string name="history_updating">Verlaufsliste wird aktualisiert</string>
-<string name="history_receiving">Inhalt wird empfangen</string>
-<string name="history_updated">Verlaufsliste aktualisiert</string>
-<string name="history_denied">Zugriff auf Verlauf verweigert</string>
-<string name="history_failed">Verlauf konnte nicht abgerufen werden</string>
-<string name="history_paused">Verlaufsempfang pausiert</string>
-<string name="history_unavailable">Verlaufsquelle nicht verfügbar</string>
-<string name="history_checked">Verlauf geprüft: %1$s</string>
-<string name="history_partial">Ein Teil des Verlaufs ist noch nicht verfügbar</string>
+    <string name="home">Start</string>
+    <string name="history">Verlauf</string>
+    <string name="devices">Geräte</string>
+    <string name="settings">Einstellungen</string>
+    <string name="connect_help">Öffne die App bei verbundenem Tailscale. Ein erlaubtes Gerät findet dieses Telefon.</string>
+    <string name="waiting_for_devices">Warten auf Geräte</string>
+    <string name="devices_connected">Mit %1$d Geräten verbunden</string>
+    <string name="tailscale_unavailable">Tailscale verbinden, um von Computern zu empfangen</string>
+    <string name="identity_unavailable">Geräteidentität nicht verfügbar</string>
+    <string name="listener_unavailable">Verbindung konnte nicht gestartet werden</string>
+    <string name="send_from_phone">Von diesem Telefon senden</string>
+    <string name="manual_clipboard_help">Einfügen und Senden benötigen getrennte Aktionen. Empfangener Verlauf ändert die Zwischenablage erst nach Kopieren.</string>
+    <string name="paste_clipboard">Einfügen</string>
+    <string name="image_draft">Bild bereit (%1$d Bytes)</string>
+    <string name="send_to_devices">Senden</string>
+    <string name="recent_history">Letzter Verlauf</string>
+    <string name="history_empty">Keine aktuellen Kopien</string>
+    <string name="all">Alle</string>
+    <string name="from_devices">Von Geräten</string>
+    <string name="sent_from_phone">Vom Telefon</string>
+    <string name="text_item">Text</string>
+    <string name="image_item">Bild</string>
+    <string name="this_phone">Dieses Telefon</string>
+    <string name="item_available">In App verfügbar</string>
+    <string name="item_listed">Aufgelistet; Inhalt nicht verfügbar</string>
+    <string name="back">Zurück</string>
+    <string name="bytes">%1$d Bytes</string>
+    <string name="content_unavailable">Inhalt nicht mehr verfügbar</string>
+    <string name="preview_unavailable">Vorschau nicht verfügbar</string>
+    <string name="copy_to_phone">Kopieren</string>
+    <string name="send_again">Erneut senden</string>
+    <string name="no_connected_devices">Keine verbundenen Geräte</string>
+    <string name="device_online">Online</string>
+    <string name="device_offline">Offline</string>
+    <string name="receive_from_device">Von diesem Gerät empfangen</string>
+    <string name="send_to_device">Senden an dieses Gerät erlauben</string>
+    <string name="device_consent_help">Ein Gerät mit Sendeberechtigung kann auch ältere gespeicherte Kopien bereitstellen. Senden vom Telefon erfordert eine eigene Aktion.</string>
+    <string name="privacy">Datenschutz</string>
+    <string name="clear_history">Lokalen Verlauf löschen</string>
+    <string name="clear_history_help">Dies löscht den Cache des Telefons. Erlaubte Computer können Kopien erneut bereitstellen. Ein Bild in der Systemzwischenablage bleibt kurz nutzbar.</string>
+    <string name="clear">Löschen</string>
+    <string name="cancel">Abbrechen</string>
+    <string name="history_count">%1$d Einträge im Verlauf</string>
+    <string name="send_queued">Senden an erlaubte Geräte</string>
+    <string name="no_send_targets">Senden an mindestens ein verbundenes Gerät erlauben</string>
+    <string name="unsupported_image">Bild zu groß oder nicht unterstützt</string>
+    <string name="unsupported_text">Text zu groß oder nicht unterstützt</string>
+    <string name="unsupported_clipboard">Inhalt der Zwischenablage nicht unterstützt</string>
+    <string name="copied_to_phone">Auf dieses Telefon kopiert</string>
+    <string name="copy_uncertain">Kopie nicht bestätigt</string>
+    <string name="policy_failed">Geräteberechtigung konnte nicht gespeichert werden</string>
+    <string name="transfer_queued">Warteschlange</string>
+    <string name="transfer_sending">Wird gesendet</string>
+    <string name="transfer_applied">Bestätigt</string>
+    <string name="transfer_failed">Fehlgeschlagen</string>
+    <string name="transfer_unknown">Keine Antwort</string>
+    <string name="history_mode">Verlaufsmodus</string>
+    <string name="history_off">Aus</string>
+    <string name="history_status">Nur Status</string>
+    <string name="history_content">Inhalt behalten</string>
+    <string name="history_limit">Maximale Einträge</string>
+    <string name="apply_history_limit">Limit übernehmen</string>
+    <string name="history_limit_help">0–10.000 Einträge. Null beendet Verlaufsabfragen; Bild- und Speichergrenzen gelten weiter.</string>
+    <string name="settings_failed">Verlaufseinstellungen konnten nicht gespeichert werden</string>
+    <string name="app_version">App-Version: %1$s</string>
+    <string name="history_waiting">Warten auf Verlauf</string>
+    <string name="history_updating">Verlaufsliste wird aktualisiert</string>
+    <string name="history_receiving">Inhalt wird empfangen</string>
+    <string name="history_updated">Verlaufsliste aktualisiert</string>
+    <string name="history_denied">Zugriff auf Verlauf verweigert</string>
+    <string name="history_failed">Verlauf konnte nicht abgerufen werden</string>
+    <string name="history_paused">Verlaufsempfang pausiert</string>
+    <string name="history_unavailable">Verlaufsquelle nicht verfügbar</string>
+    <string name="history_checked">Verlauf geprüft: %1$s</string>
+    <string name="history_partial">Ein Teil des Verlaufs ist noch nicht verfügbar</string>
+    <string name="images">Bilder</string>
+    <string name="checked_time">Geprüft %1$s</string>
+    <string name="history_empty_help">Kopien von erlaubten Geräten erscheinen hier.</string>
+    <string name="show_more">Mehr anzeigen</string>
+    <string name="show_less">Weniger anzeigen</string>
+    <string name="ready_to_send">Bereit zum Senden</string>
+    <string name="send_clipboard">Zwischenablage senden</string>
+    <string name="devices_can_receive">%1$d Geräte können empfangen</string>
+    <string name="to_devices">An %1$d Geräte</string>
+    <string name="send_targets">Senden an</string>
+    <string name="targets_help">Verwalte Sendeberechtigungen unter Geräte. Nur verbundene, erlaubte Geräte empfangen diese Sendung.</string>
+    <string name="done">Fertig</string>
+    <string name="device_permissions_help">Wähle, welche Geräte an dieses Telefon senden und von ihm empfangen dürfen.</string>
+    <string name="device_details">Gerätedetails</string>
+    <string name="connection">Verbindung</string>
+    <string name="receiving">Empfangen</string>
+    <string name="sending">Senden</string>
+    <string name="receive_help">Rufe aktuelle Einträge ab, während die App geöffnet ist. Inhalte bleiben in der App, bis du Kopieren antippst.</string>
+    <string name="send_help">Senden erfolgt immer manuell. Erst Einfügen, dann Senden.</string>
+    <string name="device_fingerprint">Gerätefingerabdruck</string>
+    <string name="confirm_device">Dieses Gerät bestätigen</string>
+    <string name="fingerprint_help">Öffne auf %1$s Status › Verbindungsdetails und vergleiche den vollständigen Fingerabdruck, bevor du Senden erlaubst.</string>
+    <string name="allow_sending">Senden erlauben</string>
+    <string name="about">Über</string>
+    <string name="refresh">Verlauf aktualisieren</string>
+    <string name="refresh_unavailable">Verlauf konnte nicht angefordert werden. Prüfe die Verbindung.</string>
+    <string name="content_types">Inhaltstypen</string>
+    <string name="content_types_help">Wähle die zu sendenden und abzurufenden Typen. Metadaten und zuvor empfangene Kopien bleiben im Verlauf.</string>
+    <string name="language">Sprache</string>
+    <string name="system_language">Systemstandard</string>
 </resources>

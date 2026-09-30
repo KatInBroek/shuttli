@@ -3,6 +3,20 @@ import Foundation
 struct DeviceDirections: Codable {
     let send: Bool
     let receive: Bool
+    let text: Bool
+    let image: Bool
+
+    init(send: Bool, receive: Bool, text: Bool = true, image: Bool = true) {
+        self.send = send; self.receive = receive; self.text = text; self.image = image
+    }
+    private enum CodingKeys: String, CodingKey { case send, receive, text, image }
+    init(from decoder: Decoder) throws {
+        let source = try decoder.container(keyedBy: CodingKeys.self)
+        send = try source.decode(Bool.self, forKey: .send)
+        receive = try source.decode(Bool.self, forKey: .receive)
+        text = try source.decodeIfPresent(Bool.self, forKey: .text) ?? true
+        image = try source.decodeIfPresent(Bool.self, forKey: .image) ?? true
+    }
 }
 
 enum DevicePolicyStore {
@@ -22,11 +36,11 @@ enum DevicePolicyStore {
     }
 
     @discardableResult
-    static func save(id: String, send: Bool, receive: Bool) -> Bool {
+    static func save(id: String, send: Bool, receive: Bool, text: Bool? = nil, image: Bool? = nil) -> Bool {
         guard id.count == 64, id.utf8.allSatisfy({ ($0 >= 48 && $0 <= 57) || ($0 >= 97 && $0 <= 102) }),
               var url = url else { return false }
         var current = load()
-        current[id] = DeviceDirections(send: send, receive: receive)
+        current[id] = DeviceDirections(send: send, receive: receive, text: text ?? current[id]?.text ?? true, image: image ?? current[id]?.image ?? true)
         guard current.count <= 32, let bytes = try? JSONEncoder().encode(current) else { return false }
         do {
             try bytes.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])

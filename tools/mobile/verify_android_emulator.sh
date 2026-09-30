@@ -20,7 +20,7 @@ adb install -r apps/android/paste-probe/build/outputs/apk/debug/paste-probe-debu
 
 result=$(adb shell am instrument -w -e class org.katinbroek.shuttli.MobileInstrumentedTest \
   org.katinbroek.shuttli.test/androidx.test.runner.AndroidJUnitRunner)
-[[ $result == *'OK (4 tests)'* ]] || { echo "$result"; exit 1; }
+[[ $result == *'OK (7 tests)'* ]] || { echo "$result"; exit 1; }
 printf '%s\n' "$result"
 
 adb logcat -c
