@@ -88,6 +88,26 @@ async fn read_v2_frame(s: &mut (impl AsyncRead + Unpin)) -> Result<FrameV2> {
     s.read_exact(&mut bytes).await.map_err(|e| e.to_string())?;
     FrameV2::decode(&bytes).map_err(str::to_owned)
 }
+/// Time out idle polls before consuming bytes. Once a frame starts, finish it
+/// within the transfer deadline or close the session rather than retry mid-frame.
+async fn read_v2_frame_or_idle(
+    stream: &mut (impl AsyncRead + Unpin),
+    idle: Duration,
+) -> Result<Option<FrameV2>> {
+    let mut first = [0u8; 1];
+    match timeout(idle, stream.read(&mut first)).await {
+        Err(_) => return Ok(None),
+        Ok(Err(error)) => return Err(error.to_string()),
+        Ok(Ok(0)) => return Err("history connection closed".into()),
+        Ok(Ok(_)) => {}
+    }
+    let mut prefixed = std::io::Cursor::new(first).chain(stream);
+    timeout(DEADLINE, read_v2_frame(&mut prefixed))
+        .await
+        .map_err(|_| "v2 frame timed out")?
+        .map(Some)
+}
+
 async fn write_frame(s: &mut (impl AsyncWrite + Unpin), v: &Frame) -> Result<()> {
     let b = serde_json::to_vec(v).map_err(|e| e.to_string())?;
     if b.len() > 16384 {
@@ -749,9 +769,8 @@ async fn serve_v2_session(
                 }
             }
         }
-        let frame = match timeout(Duration::from_secs(5), read_v2_frame(tls)).await {
-            Ok(result) => result?,
-            Err(_) => continue,
+        let Some(frame) = read_v2_frame_or_idle(tls, Duration::from_secs(5)).await? else {
+            continue;
         };
         match frame {
             FrameV2::HistoryListRequest { cursor, limit } if capabilities.history_pull => {
@@ -1171,6 +1190,41 @@ async fn receive_transfer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn fragmented_v2_request_survives_the_idle_poll_deadline() {
+        let (mut remote, mut local) = tokio::io::duplex(1024);
+        assert!(
+            read_v2_frame_or_idle(&mut local, Duration::from_millis(5))
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let bytes = FrameV2::HistoryListRequest {
+            cursor: None,
+            limit: 20,
+        }
+        .encode()
+        .unwrap();
+        let mut packet = (bytes.len() as u32).to_be_bytes().to_vec();
+        packet.extend(bytes);
+        remote.write_all(&packet[..2]).await.unwrap();
+        let sender = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            remote.write_all(&packet[2..]).await.unwrap();
+        });
+        assert!(matches!(
+            read_v2_frame_or_idle(&mut local, Duration::from_millis(5))
+                .await
+                .unwrap(),
+            Some(FrameV2::HistoryListRequest {
+                cursor: None,
+                limit: 20
+            })
+        ));
+        sender.await.unwrap();
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn offline_start_does_not_queue_content_and_keeps_latest_permission_revision() {
         let (_, events) = tokio::sync::mpsc::channel(1);
