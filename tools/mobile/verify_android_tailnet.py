@@ -46,8 +46,14 @@ def main():
     xclip = config.get("xclip", "xclip")
 
     def command(*words):
-        result = subprocess.check_output([binary, *words, "--json"], env=env, timeout=20)
-        answer = json.loads(result)
+        result = subprocess.run([binary, *words, "--json"], env=env, timeout=20,
+                                capture_output=True)
+        if result.returncode:
+            (output / "failed-control-stdout.log").write_bytes(result.stdout)
+            (output / "failed-control-stderr.log").write_bytes(result.stderr)
+            raise RuntimeError(f"Control command {words!r} exited {result.returncode}; "
+                               "details saved in the private output directory")
+        answer = json.loads(result.stdout)
         assert answer["type"] != "error", answer
         return answer
 
