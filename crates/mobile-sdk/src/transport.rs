@@ -257,7 +257,11 @@ async fn accept_desktop(
         .map_err(|_| "history unavailable")?
         .generation();
     let (sender, commands) = mpsc::channel(8);
-    context.routes.lock().await.insert(remote_id, sender);
+    context
+        .routes
+        .lock()
+        .await
+        .insert(remote_id, sender.clone());
     let result = mobile_session(
         &mut tls,
         remote_id,
@@ -267,13 +271,7 @@ async fn accept_desktop(
         commands,
     )
     .await;
-    if let Ok(mut history) = context.history.lock() {
-        history.source_activity(generation, remote_id, HistoryActivity::Failed, None);
-    }
-    context.routes.lock().await.remove(&remote_id);
-    if let Ok(mut directory) = context.peers.lock() {
-        directory.disconnected(remote_id);
-    }
+    finish_session(&context, remote_id, generation, &sender).await;
     result
 }
 
@@ -357,7 +355,11 @@ async fn connect_candidate(candidate: Candidate, context: SessionContext) -> Res
         .map_err(|_| "history unavailable")?
         .generation();
     let (sender, commands) = mpsc::channel(8);
-    context.routes.lock().await.insert(remote_id, sender);
+    context
+        .routes
+        .lock()
+        .await
+        .insert(remote_id, sender.clone());
     let result = mobile_session(
         &mut tls,
         remote_id,
@@ -367,11 +369,42 @@ async fn connect_candidate(candidate: Candidate, context: SessionContext) -> Res
         commands,
     )
     .await;
-    context.routes.lock().await.remove(&remote_id);
-    if let Ok(mut directory) = context.peers.lock() {
-        directory.disconnected(remote_id);
-    }
+    finish_session(&context, remote_id, generation, &sender).await;
     result
+}
+
+/// Only the currently registered session may invalidate this source's state.
+async fn finish_session(
+    context: &SessionContext,
+    source: DeviceId,
+    generation: u64,
+    sender: &mpsc::Sender<SendCommand>,
+) {
+    let mut routes = context.routes.lock().await;
+    if routes
+        .get(&source)
+        .is_none_or(|current| !current.same_channel(sender))
+    {
+        return;
+    }
+    routes.remove(&source);
+    if let Ok(mut history) = context.history.lock() {
+        history.source_activity(generation, source, HistoryActivity::Failed, None);
+    }
+    if let Ok(mut results) = context.results.lock() {
+        for ((_, target), state) in results.iter_mut() {
+            if *target == source {
+                *state = match *state {
+                    SendState::Queued => SendState::Failed,
+                    SendState::Sending => SendState::Unknown,
+                    terminal => terminal,
+                };
+            }
+        }
+    }
+    if let Ok(mut directory) = context.peers.lock() {
+        directory.disconnected(source);
+    }
 }
 
 async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
@@ -789,6 +822,61 @@ mod tests {
             FrameV2::HistoryChanged { revision: 7 }
         ));
         assert!(reader.is_idle());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn session_cleanup_preserves_replacement_and_settles_only_its_source() {
+        let source = [2; 32];
+        let event = EventId {
+            origin: [1; 32],
+            epoch: [1; 16],
+            seq: 1,
+        };
+        let history = Arc::new(Mutex::new(MobileHistory::default()));
+        let generation = history.lock().unwrap().enter_foreground();
+        history.lock().unwrap().source_activity(
+            generation,
+            source,
+            HistoryActivity::Receiving,
+            Some(event),
+        );
+        let (_, stop) = watch::channel(false);
+        let context = SessionContext {
+            identity: Arc::new(Identity::generate().unwrap().0),
+            name: "Phone".into(),
+            epoch: [1; 16],
+            history: history.clone(),
+            peers: Arc::new(Mutex::new(PeerDirectory::new([1; 32]))),
+            results: Arc::new(Mutex::new(BTreeMap::new())),
+            routes: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
+            stop,
+        };
+        let (old, _) = mpsc::channel(8);
+        let (current, _) = mpsc::channel(8);
+        context.routes.lock().await.insert(source, current.clone());
+        finish_session(&context, source, generation, &old).await;
+        assert_eq!(
+            history.lock().unwrap().source(source).unwrap().receiving,
+            Some(event)
+        );
+        let queued = EventId { seq: 2, ..event };
+        let applied = EventId { seq: 3, ..event };
+        context.results.lock().unwrap().extend([
+            ((event, source), SendState::Sending),
+            ((queued, source), SendState::Queued),
+            ((applied, source), SendState::Applied),
+            ((event, [3; 32]), SendState::Queued),
+        ]);
+        finish_session(&context, source, generation, &current).await;
+        assert!(!context.routes.lock().await.contains_key(&source));
+        let freshness = history.lock().unwrap().source(source).unwrap();
+        assert_eq!(freshness.activity, HistoryActivity::Failed);
+        assert_eq!(freshness.receiving, None);
+        let results = context.results.lock().unwrap();
+        assert_eq!(results[&(event, source)], SendState::Unknown);
+        assert_eq!(results[&(queued, source)], SendState::Failed);
+        assert_eq!(results[&(applied, source)], SendState::Applied);
+        assert_eq!(results[&(event, [3; 32])], SendState::Queued);
     }
 
     #[test]
