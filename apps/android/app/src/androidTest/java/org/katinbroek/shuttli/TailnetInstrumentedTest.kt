@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.util.Log
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -68,6 +69,20 @@ class TailnetInstrumentedTest {
         remoteText("desktop tailnet text $token")
         assertEquals("phone clipboard sentinel", clipboardText())
         await { state.snapshot.devices.any { it.id == peerId && it.historyActivity == MobileHistoryActivity.UPDATED } }
+        // Exercise the real device-detail consent UI before any phone send.
+        state.selectHistory(null)
+        await { state.snapshot.selected == null }
+        rule.onNodeWithText(activity.getString(R.string.devices)).performClick()
+        rule.onNodeWithText(state.snapshot.devices.first { it.id == peerId }.name).performClick()
+        rule.onNodeWithContentDescription(activity.getString(R.string.send_to_device)).performClick()
+        rule.onNodeWithText(activity.getString(R.string.confirm_device)).assertExists()
+        rule.onNodeWithText(activity.getString(R.string.cancel)).performClick()
+        assertFalse(state.snapshot.devices.first { it.id == peerId }.send)
+        rule.onNodeWithContentDescription(activity.getString(R.string.send_to_device)).performClick()
+        rule.onNodeWithText(activity.getString(R.string.allow_sending)).performClick()
+        await { state.snapshot.devices.first { it.id == peerId }.send }
+        rule.onNodeWithText(activity.getString(R.string.home)).performClick()
+
         checkpoint("desktop-incremental")
         remoteText("desktop incremental text $token")
         assertTrue(state.snapshot.history.count { it.eventKey.startsWith(peerId) && it.available } >= 2)

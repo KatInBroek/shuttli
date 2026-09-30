@@ -32,6 +32,8 @@ jobs:
             apps/android/app/build/outputs/bundle/release/app-release.aab
             apps/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             target/mobile-android/manifest.json
+            apps/android/app/build/tmp/kotlin-classes/debug/org/
+            apps/android/app/build/outputs/unit_test_code_coverage/
           if-no-files-found: error
   android-emulator:
     needs: android-package
@@ -60,6 +62,17 @@ jobs:
           profile: pixel_7
           emulator-options: -no-snapshot-load -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           script: bash tools/mobile/verify_android_emulator.sh
+      - name: Report Android application coverage
+        run: cd apps/android && ./gradlew --no-daemon :app:mobileCoverageReport
+      - name: Upload Android coverage
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-coverage
+          path: |
+            apps/android/app/build/reports/jacoco/mobileCoverageReport/
+            apps/android/app/build/outputs/code_coverage/
+          if-no-files-found: error
   ios-simulator:
     runs-on: macos-15
     steps:
@@ -75,6 +88,17 @@ jobs:
         run: bash tools/mobile/install_xcodegen.sh
       - name: Build iOS simulator app and device library without signing
         run: bash tools/mobile/build_ios.sh
+      - name: Test iOS app state and native navigation
+        run: bash tools/mobile/verify_ios_simulator.sh
+      - name: Upload iOS tests and coverage
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ios-tests
+          path: |
+            target/ios-tests.xcresult
+            target/ios-coverage.json
+          if-no-files-found: error
   contracts:
     strategy:
       fail-fast: false
@@ -115,6 +139,8 @@ jobs:
           cargo +stable install cargo-llvm-cov --version 0.9.1 --locked
       - name: Measure core production code
         run: cargo +stable llvm-cov -p shuttli-core --locked --json --output-path target/core-coverage.json
+      - name: Report shared mobile SDK and native boundary coverage
+        run: cargo +stable llvm-cov -p shuttli-mobile-sdk -p shuttli-mobile-ffi --locked --json --output-path target/mobile-coverage.json
       - name: Require strictly greater than 95 percent coverage
         run: python3 tools/check_core_coverage.py target/core-coverage.json --summary-output target/core-coverage-summary.json
       - name: Save coverage evidence
@@ -122,7 +148,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: core-coverage
-          path: target/core-coverage*.json
+          path: |
+            target/core-coverage*.json
+            target/mobile-coverage.json
           if-no-files-found: error
 
   linux-ui:

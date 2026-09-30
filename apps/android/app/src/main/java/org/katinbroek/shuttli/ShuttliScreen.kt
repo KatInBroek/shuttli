@@ -21,6 +21,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -320,7 +322,7 @@ private fun SettingsSection(title: String, content: @Composable ColumnScope.() -
 private fun SettingToggle(title: String, value: Boolean, change: (Boolean) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-        Switch(checked = value, onCheckedChange = change)
+        Switch(checked = value, onCheckedChange = change, modifier = Modifier.semantics { contentDescription = title })
     }
 }
 

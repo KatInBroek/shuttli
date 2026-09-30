@@ -87,6 +87,23 @@ class MobileInstrumentedTest {
         rule.onNodeWithText(activity.getString(R.string.app_version, BuildConfig.VERSION_NAME)).assertExists()
     }
 
+    @Test fun languageSelectionSurvivesRecreationAndCanBeRestored() {
+        val original = LanguageStore.current(rule.activity)
+        try {
+            rule.onNodeWithText(rule.activity.getString(R.string.settings)).performClick()
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(rule.activity.getString(R.string.system_language)))
+            rule.onNodeWithText(rule.activity.getString(R.string.system_language)).performClick()
+            rule.onNodeWithText("Français").performClick()
+            rule.waitUntil(5000) { LanguageStore.current(rule.activity) == "fr" }
+            rule.onNodeWithText("Historique").assertExists()
+            rule.activityRule.scenario.recreate()
+            rule.onNodeWithText("Historique").assertExists()
+        } finally {
+            rule.runOnUiThread { LanguageStore.change(rule.activity, original) }
+            rule.waitUntil(5000) { LanguageStore.current(rule.activity) == original }
+        }
+    }
+
     @Test fun exportedImageStaysReadableAfterHistoryClear() {
         val activity = rule.activity
         val bitmap = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
