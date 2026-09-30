@@ -81,6 +81,8 @@ class TailnetInstrumentedTest {
         rule.onNodeWithContentDescription(activity.getString(R.string.send_to_device)).performClick()
         rule.onNodeWithText(activity.getString(R.string.allow_sending)).performClick()
         await { state.snapshot.devices.first { it.id == peerId }.send }
+        rule.onNodeWithContentDescription(activity.getString(R.string.send_to_device)).performClick()
+        await { !state.snapshot.devices.first { it.id == peerId }.send }
         rule.onNodeWithText(activity.getString(R.string.home)).performClick()
 
         checkpoint("desktop-incremental")

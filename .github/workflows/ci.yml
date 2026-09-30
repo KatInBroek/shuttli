@@ -140,7 +140,7 @@ jobs:
       - name: Measure core production code
         run: cargo +stable llvm-cov -p shuttli-core --locked --json --output-path target/core-coverage.json
       - name: Report shared mobile SDK and native boundary coverage
-        run: cargo +stable llvm-cov -p shuttli-mobile-sdk -p shuttli-mobile-ffi --locked --json --output-path target/mobile-coverage.json
+        run: cargo +stable llvm-cov -p shuttli-mobile-sdk -p shuttli-mobile-ffi --locked --ignore-filename-regex "(mobile-sdk|mobile-ffi)/src/tests/" --json --output-path target/mobile-coverage.json
       - name: Require strictly greater than 95 percent coverage
         run: python3 tools/check_core_coverage.py target/core-coverage.json --summary-output target/core-coverage-summary.json
       - name: Save coverage evidence
