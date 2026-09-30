@@ -21,7 +21,34 @@ uniffi::setup_scaffolding!();
 
 #[uniffi::export]
 pub fn sdk_api_version() -> u32 {
-    4
+    5
+}
+
+#[derive(Clone, uniffi::Enum)]
+pub enum MobileHistoryActivity {
+    Waiting,
+    Updating,
+    Receiving,
+    Updated,
+    Denied,
+    Failed,
+    Paused,
+    Unavailable,
+}
+
+impl From<shuttli_mobile_sdk::HistoryActivity> for MobileHistoryActivity {
+    fn from(value: shuttli_mobile_sdk::HistoryActivity) -> Self {
+        use shuttli_mobile_sdk::HistoryActivity as H;
+        match value {
+            H::Waiting => Self::Waiting,
+            H::Updating => Self::Updating,
+            H::Receiving => Self::Receiving,
+            H::Updated => Self::Updated,
+            H::Denied => Self::Denied,
+            H::Failed => Self::Failed,
+            H::Paused => Self::Paused,
+        }
+    }
 }
 
 #[uniffi::export]
@@ -71,6 +98,7 @@ pub struct MobileHistoryRow {
     pub bytes: u64,
     pub available: bool,
     pub is_local: bool,
+    pub receiving: bool,
 }
 
 #[derive(Clone, uniffi::Record)]
@@ -80,6 +108,9 @@ pub struct MobileDeviceRow {
     pub online: bool,
     pub send: bool,
     pub receive: bool,
+    pub history_activity: MobileHistoryActivity,
+    pub checked_at_ms: u64,
+    pub history_partial: bool,
 }
 
 #[derive(Clone, uniffi::Enum)]
@@ -334,6 +365,9 @@ impl MobileSession {
                 bytes: row.summary.metadata.size,
                 available: history.body_available(row.summary.event),
                 is_local: own == Some(row.source),
+                receiving: history
+                    .source(row.source)
+                    .is_some_and(|source| source.receiving == Some(row.summary.event)),
             })
             .collect()
     }
@@ -360,12 +394,26 @@ impl MobileSession {
                     .expect("mobile directory lock")
                     .direct()
                     .into_iter()
-                    .map(|peer| MobileDeviceRow {
-                        id: hex::encode(peer.id),
-                        name: peer.name,
-                        online: peer.online,
-                        send: peer.directions.send,
-                        receive: peer.directions.receive,
+                    .map(|peer| {
+                        let history = self.history.lock().expect("mobile history lock");
+                        let freshness = history.source(peer.id);
+                        let activity = if !peer.directions.receive || !history.query_enabled() {
+                            MobileHistoryActivity::Paused
+                        } else if !peer.online {
+                            MobileHistoryActivity::Unavailable
+                        } else {
+                            freshness.map_or(MobileHistoryActivity::Waiting, |s| s.activity.into())
+                        };
+                        MobileDeviceRow {
+                            id: hex::encode(peer.id),
+                            name: peer.name,
+                            online: peer.online,
+                            send: peer.directions.send,
+                            receive: peer.directions.receive,
+                            history_activity: activity,
+                            checked_at_ms: freshness.map_or(0, |s| s.checked_at_ms),
+                            history_partial: freshness.is_some_and(|s| s.partial),
+                        }
                     })
                     .collect()
             })
@@ -669,7 +717,7 @@ mod tests {
     #[test]
     fn native_bridge_preserves_one_session_across_lifecycle() {
         let session = MobileSession::new();
-        assert_eq!(sdk_api_version(), 4);
+        assert_eq!(sdk_api_version(), 5);
         let first = session.enter_foreground();
         session.enter_background();
         assert!(session.enter_foreground() > first);

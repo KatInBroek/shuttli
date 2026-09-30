@@ -43,6 +43,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import uniffi.shuttli_mobile_ffi.MobileContentKind
 import uniffi.shuttli_mobile_ffi.MobileHistoryRow
 import uniffi.shuttli_mobile_ffi.MobileHistoryMode
+import uniffi.shuttli_mobile_ffi.MobileHistoryActivity
 import uniffi.shuttli_mobile_ffi.MobileTransferState
 import java.text.DateFormat
 import java.util.Date
@@ -83,6 +84,9 @@ private fun HomePage(data: UiSnapshot, state: MobileAppState, activity: Activity
         item {
             Text(statusText(data), style = MaterialTheme.typography.titleMedium)
             Text(stringResource(R.string.connect_help), style = MaterialTheme.typography.bodySmall)
+            data.devices.forEach { device ->
+                Text(device.name + ": " + historyActivityText(device.historyActivity), style = MaterialTheme.typography.bodySmall)
+            }
         }
         item {
             HorizontalDivider()
@@ -137,7 +141,7 @@ private fun HistoryRow(row: MobileHistoryRow, onClick: () -> Unit) {
         Text(if (row.isLocal) stringResource(R.string.this_phone) else row.sourceName)
         Text(DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(row.copiedAtMs.toLong())),
             style = MaterialTheme.typography.bodySmall)
-        Text(stringResource(if (row.available) R.string.item_available else R.string.item_listed),
+        Text(stringResource(if (row.available) R.string.item_available else if (row.receiving) R.string.history_receiving else R.string.item_listed),
             style = MaterialTheme.typography.bodySmall)
         HorizontalDivider()
     }
@@ -183,6 +187,11 @@ private fun DevicesPage(data: UiSnapshot, state: MobileAppState) {
             Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
                 Text(device.name, style = MaterialTheme.typography.titleMedium)
                 Text(stringResource(if (device.online) R.string.device_online else R.string.device_offline))
+                Text(historyActivityText(device.historyActivity), style = MaterialTheme.typography.bodySmall)
+                if (device.checkedAtMs > 0uL) Text(stringResource(R.string.history_checked,
+                    DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(device.checkedAtMs.toLong()))),
+                    style = MaterialTheme.typography.bodySmall)
+                if (device.historyPartial) Text(stringResource(R.string.history_partial), style = MaterialTheme.typography.bodySmall)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.receive_from_device), modifier = Modifier.weight(1f))
                     Switch(checked = device.receive, onCheckedChange = { state.setDirections(device, receive = it) })
@@ -203,6 +212,7 @@ private fun SettingsPage(data: UiSnapshot, state: MobileAppState) {
     var confirm by remember { mutableStateOf(false) }
     var limitText by remember(data.historyLimit) { mutableStateOf(data.historyLimit.toString()) }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(stringResource(R.string.app_version, BuildConfig.VERSION_NAME), style = MaterialTheme.typography.bodySmall)
         Text(stringResource(R.string.privacy), style = MaterialTheme.typography.titleLarge)
         Text(stringResource(R.string.manual_clipboard_help))
         Text(stringResource(R.string.history_mode), style = MaterialTheme.typography.titleMedium)
@@ -232,6 +242,18 @@ private fun SettingsPage(data: UiSnapshot, state: MobileAppState) {
         data.actionStatus?.let { Text(actionText(it)) }
     }
 }
+
+@Composable
+private fun historyActivityText(state: MobileHistoryActivity): String = stringResource(when (state) {
+    MobileHistoryActivity.WAITING -> R.string.history_waiting
+    MobileHistoryActivity.UPDATING -> R.string.history_updating
+    MobileHistoryActivity.RECEIVING -> R.string.history_receiving
+    MobileHistoryActivity.UPDATED -> R.string.history_updated
+    MobileHistoryActivity.DENIED -> R.string.history_denied
+    MobileHistoryActivity.FAILED -> R.string.history_failed
+    MobileHistoryActivity.PAUSED -> R.string.history_paused
+    MobileHistoryActivity.UNAVAILABLE -> R.string.history_unavailable
+})
 
 @Composable
 private fun statusText(data: UiSnapshot): String = when (data.status) {

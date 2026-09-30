@@ -62,3 +62,14 @@
 "apply_history_limit" = "Apply limit";
 "history_limit_help" = "0–10,000 items. Zero stops history queries; image and memory quotas still apply.";
 "settings_unavailable" = "Could not save history settings";
+"app_version" = "App version";
+"history_waiting" = "Waiting for history";
+"history_updating" = "Updating history list";
+"history_receiving" = "Receiving content";
+"history_updated" = "History list updated";
+"history_denied" = "History access denied";
+"history_failed" = "Could not retrieve history";
+"history_paused" = "History reception paused";
+"history_unavailable" = "History source unavailable";
+"history_checked" = "History checked: %@";
+"history_partial" = "Some history is still unavailable";

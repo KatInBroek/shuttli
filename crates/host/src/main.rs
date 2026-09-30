@@ -2,6 +2,11 @@
 #[cfg(unix)]
 mod unix;
 fn main() -> std::process::ExitCode {
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.len() == 1 && matches!(args[0].as_str(), "--version" | "-V" | "version") {
+        println!("{} {}", shuttli_brand::NAME, shuttli_brand::VERSION);
+        return std::process::ExitCode::SUCCESS;
+    }
     // Build metadata must work without a daemon, profile, or OS clipboard.
     if std::env::args().skip(1).eq(["--print-product-name"]) {
         println!("{}", shuttli_brand::NAME);

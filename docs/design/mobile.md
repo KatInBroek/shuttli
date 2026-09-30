@@ -108,6 +108,8 @@ Design for iPhone and Android phones using their native accessibility, lifecycle
 
 Support English, Dutch, German and French, plus following the system language. Deliver light and dark appearances, large text, VoiceOver/TalkBack semantics, suitable touch targets, long content/device names, localized text expansion and reduced motion. Status must remain understandable without color alone.
 
+Users must be able to find the actual installed app version for support and compatibility checks. The design team chooses its placement.
+
 The app should be lightweight, with bounded previews and history. Idle and background states must not imply continuous work or require sustained animation. Use the established Web brand and logo as context and prepare native mobile app icon assets. The design team selects the visual language and its adaptation to phone use.
 
 ## Design deliverables and review criteria

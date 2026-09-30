@@ -151,5 +151,8 @@
   "status.discovered": "Appareils découverts",
   "status.allowed_send": "↑ Envoi autorisé",
   "status.allowed_receive": "↓ Réception autorisée",
-  "status.permissions_hint": "Les appareils hors ligne sont inclus. Une direction est autorisée uniquement si son interrupteur global et celui de l’appareil sont activés. Ces autorisations sont locales ; le transfert dépend aussi de l’autre appareil."
+  "status.permissions_hint": "Les appareils hors ligne sont inclus. Une direction est autorisée uniquement si son interrupteur global et celui de l’appareil sont activés. Ces autorisations sont locales ; le transfert dépend aussi de l’autre appareil.",
+  "ui.app_version": "Version de l’application",
+  "devices.history_pull": "Reçoit via l’historique lorsque l’application est ouverte",
+  "result.history_pull": "Aucun transfert direct lancé ; les appareils autorisés récupèrent l’historique conservé"
 }

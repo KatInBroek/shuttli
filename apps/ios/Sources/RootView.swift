@@ -28,6 +28,9 @@ private struct HomeView: View {
                     Label(LocalizedStringKey(state.connectionStatusKey), systemImage: state.connectedPeerCount > 0 ? "checkmark.circle" : "wifi.slash")
                     Text(LocalizedStringKey(state.connectedPeerCount > 0 ? "history_help" : "connect_help"))
                         .foregroundStyle(.secondary)
+                    ForEach(state.deviceRows, id: \.id) { device in
+                        Text(device.name + ": " + NSLocalizedString(device.historyActivity.label, comment: "")).font(.caption)
+                    }
                 }
                 Section("send_from_phone") {
                     Text("paste_text").foregroundStyle(.secondary)
@@ -150,7 +153,7 @@ private struct HistoryRowLink: View {
                     .font(.subheadline).foregroundStyle(.secondary)
                 Text(Date(timeIntervalSince1970: Double(row.copiedAtMs) / 1000).formatted(date: .abbreviated, time: .shortened))
                     .font(.caption).foregroundStyle(.secondary)
-                Text(row.available ? "item_available" : "item_listed")
+                Text(row.available ? "item_available" : row.receiving ? "history_receiving" : "item_listed")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -236,6 +239,11 @@ private struct DevicesView: View {
                     List(state.deviceRows, id: \.id) { device in
                         Section(device.name) {
                             Label(device.online ? "device_online" : "device_offline", systemImage: device.online ? "checkmark.circle" : "circle")
+                            Text(LocalizedStringKey(device.historyActivity.label)).foregroundStyle(.secondary)
+                            if device.checkedAtMs > 0 {
+                                Text(String(format: NSLocalizedString("history_checked", comment: ""), Date(timeIntervalSince1970: Double(device.checkedAtMs) / 1000).formatted(date: .abbreviated, time: .shortened))).font(.caption)
+                            }
+                            if device.historyPartial { Text("history_partial").font(.caption) }
                             Toggle("receive_from_device", isOn: Binding(
                                 get: { state.deviceRows.first(where: { $0.id == device.id })?.receive ?? device.receive },
                                 set: { state.setReceive($0, for: device) }
@@ -305,6 +313,11 @@ private struct SettingsView: View {
                     }
                     Button("clear_history", role: .destructive) { confirmClear = true }
                 }
+                Section {
+                    LabeledContent("app_version") {
+                        Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
+                    }
+                }
             }
             .navigationTitle("settings")
             .onAppear { limitDraft = String(state.historyLimit) }
@@ -314,6 +327,21 @@ private struct SettingsView: View {
             } message: {
                 Text("clear_history_help")
             }
+        }
+    }
+}
+
+private extension MobileHistoryActivity {
+    var label: String {
+        switch self {
+        case .waiting: "history_waiting"
+        case .updating: "history_updating"
+        case .receiving: "history_receiving"
+        case .updated: "history_updated"
+        case .denied: "history_denied"
+        case .failed: "history_failed"
+        case .paused: "history_paused"
+        case .unavailable: "history_unavailable"
         }
     }
 }

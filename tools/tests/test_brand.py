@@ -38,6 +38,7 @@ class BrandTests(unittest.TestCase):
             (path / 'brand.py').write_bytes((UI / 'brand.py').read_bytes())
             name = 'Élan "A" \\ {name}'
             (path / 'product-name.txt').write_text(name, encoding='utf-8')
+            (path / 'product-version.txt').write_text('1.2.3', encoding='utf-8')
             result = subprocess.check_output([sys.executable, '-c', 'import brand; print(brand.NAME)'], cwd=path, env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
             self.assertEqual(result.decode().strip(), name)
 

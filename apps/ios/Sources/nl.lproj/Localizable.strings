@@ -62,3 +62,14 @@
 "apply_history_limit" = "Limiet toepassen";
 "history_limit_help" = "0–10.000 items. Nul stopt geschiedenisvragen; geheugen- en afbeeldingslimieten blijven gelden.";
 "settings_unavailable" = "Geschiedenisinstellingen niet opgeslagen";
+"app_version" = "Appversie";
+"history_waiting" = "Wachten op geschiedenis";
+"history_updating" = "Geschiedenislijst bijwerken";
+"history_receiving" = "Inhoud ontvangen";
+"history_updated" = "Geschiedenislijst bijgewerkt";
+"history_denied" = "Toegang tot geschiedenis geweigerd";
+"history_failed" = "Geschiedenis ophalen mislukt";
+"history_paused" = "Ontvangst van geschiedenis gepauzeerd";
+"history_unavailable" = "Geschiedenisbron niet beschikbaar";
+"history_checked" = "Geschiedenis gecontroleerd: %@";
+"history_partial" = "Een deel van de geschiedenis is nog niet beschikbaar";

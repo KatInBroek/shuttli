@@ -10,4 +10,15 @@
 <string name="send_queued">Senden an erlaubte Geräte</string><string name="no_send_targets">Senden an mindestens ein verbundenes Gerät erlauben</string><string name="unsupported_image">Bild zu groß oder nicht unterstützt</string><string name="unsupported_text">Text zu groß oder nicht unterstützt</string><string name="unsupported_clipboard">Inhalt der Zwischenablage nicht unterstützt</string><string name="copied_to_phone">Auf dieses Telefon kopiert</string><string name="copy_uncertain">Kopie nicht bestätigt</string><string name="policy_failed">Geräteberechtigung konnte nicht gespeichert werden</string>
 <string name="transfer_queued">Warteschlange</string><string name="transfer_sending">Wird gesendet</string><string name="transfer_applied">Auf Gerät angewendet</string><string name="transfer_failed">Fehlgeschlagen</string><string name="transfer_unknown">Ergebnis unbekannt</string>
 <string name="history_mode">Verlaufsmodus</string><string name="history_off">Aus</string><string name="history_status">Nur Status</string><string name="history_content">Inhalt</string><string name="history_limit">Maximale Einträge</string><string name="apply_history_limit">Limit übernehmen</string><string name="history_limit_help">0–10.000 Einträge. Null beendet Verlaufsabfragen; Bild- und Speichergrenzen gelten weiter.</string><string name="settings_failed">Verlaufseinstellungen konnten nicht gespeichert werden</string>
+<string name="app_version">App-Version: %1$s</string>
+<string name="history_waiting">Warten auf Verlauf</string>
+<string name="history_updating">Verlaufsliste wird aktualisiert</string>
+<string name="history_receiving">Inhalt wird empfangen</string>
+<string name="history_updated">Verlaufsliste aktualisiert</string>
+<string name="history_denied">Zugriff auf Verlauf verweigert</string>
+<string name="history_failed">Verlauf konnte nicht abgerufen werden</string>
+<string name="history_paused">Verlaufsempfang pausiert</string>
+<string name="history_unavailable">Verlaufsquelle nicht verfügbar</string>
+<string name="history_checked">Verlauf geprüft: %1$s</string>
+<string name="history_partial">Ein Teil des Verlaufs ist noch nicht verfügbar</string>
 </resources>

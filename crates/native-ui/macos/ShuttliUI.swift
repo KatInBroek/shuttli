@@ -148,6 +148,7 @@ struct Content: View {
                     }
                     Button("Clear history and image cache") { model.call(["history", "clear"]) { _ in model.previewText = nil; model.previewImage = nil; model.history() } }
                     HStack { Button("Enable start at login") { model.call(["autostart", "on"]) }; Button("Disable start at login") { model.call(["autostart", "off"]) }; Button("Check status") { model.call(["autostart", "status"]) } }
+                    Text("App version: \(ProductBrand.version)").foregroundStyle(.secondary).textSelection(.enabled)
                 }
             }.frame(maxWidth: .infinity, alignment: .leading) }
         }.padding(20).frame(minWidth: 760, minHeight: 540).onAppear { model.refresh() }

@@ -151,5 +151,8 @@
   "status.discovered": "Discovered devices",
   "status.allowed_send": "↑ Allowed to send",
   "status.allowed_receive": "↓ Allowed to receive",
-  "status.permissions_hint": "Counts include offline devices. A direction is allowed only when both its global switch and device switch are on. These are local permissions; delivery also depends on the other device."
+  "status.permissions_hint": "Counts include offline devices. A direction is allowed only when both its global switch and device switch are on. These are local permissions; delivery also depends on the other device.",
+  "ui.app_version": "App version",
+  "devices.history_pull": "Receives through history while the app is open",
+  "result.history_pull": "No live clipboard transfer queued; permitted devices retrieve retained history"
 }

@@ -119,12 +119,14 @@ impl Store for MemoryStore {
                 name: "B".into(),
                 address: "test".into(),
                 online: true,
+                capabilities: shuttli_model::mobile::Capabilities::legacy_desktop(),
             },
             PeerInfo {
                 id: "03".repeat(32),
                 name: "C".into(),
                 address: "test".into(),
                 online: true,
+                capabilities: shuttli_model::mobile::Capabilities::legacy_desktop(),
             },
         ])
     }
@@ -898,4 +900,75 @@ fn quit_revokes_pending_work_and_rejects_new_operations() {
     release.send(()).unwrap();
     finish(&mut tasks);
     assert!(h.network.lock().unwrap().sent.is_empty());
+}
+
+#[test]
+fn pull_only_peers_retain_history_without_creating_live_delivery_rows() {
+    let h = Harness::new();
+    h.network
+        .lock()
+        .unwrap()
+        .input
+        .push_back(NetworkEvent::Peer(PeerInfo {
+            id: "02".repeat(32),
+            name: "Phone".into(),
+            address: "fixture".into(),
+            online: true,
+            capabilities: shuttli_model::mobile::Capabilities::pull_only(),
+        }));
+    *h.clipboard.lock().unwrap() = value(1);
+    block_on(h.app.tick());
+    let sent = h.network.lock().unwrap();
+    assert_eq!(sent.sent.len(), 1);
+    assert_eq!(sent.sent[0].target(), [3; 32]);
+    drop(sent);
+    assert!(
+        !h.rows
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.direction == "send" && r.peer == "02".repeat(32))
+    );
+    assert!(matches!(h.command(Action::Send), Answer::Done { .. }));
+    let rows = h.rows.lock().unwrap();
+    assert_eq!(rows.iter().filter(|r| r.direction == "local").count(), 2);
+    assert!(
+        !rows
+            .iter()
+            .any(|r| r.direction == "send" && r.peer == "02".repeat(32))
+    );
+}
+
+#[test]
+fn explicit_send_to_only_pull_peers_updates_history_and_reports_no_live_transfer() {
+    let h = Harness::new();
+    for byte in [2u8, 3] {
+        h.network
+            .lock()
+            .unwrap()
+            .input
+            .push_back(NetworkEvent::Peer(PeerInfo {
+                id: format!("{byte:02x}").repeat(32),
+                name: "History client".into(),
+                address: "fixture".into(),
+                online: true,
+                capabilities: shuttli_model::mobile::Capabilities::pull_only(),
+            }));
+    }
+    block_on(h.app.tick());
+    let before = match h.command(Action::Status) {
+        Answer::Status { status } => status.sequence,
+        _ => panic!(),
+    };
+    assert!(matches!(h.command(Action::Send), Answer::Done { message }
+        if message.contains("No live clipboard transfer queued")));
+    assert!(h.network.lock().unwrap().sent.is_empty());
+    let rows = h.rows.lock().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].direction, "local");
+    drop(rows);
+    assert!(
+        matches!(h.command(Action::Status), Answer::Status { status }
+        if status.sequence > before)
+    );
 }

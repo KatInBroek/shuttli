@@ -12,7 +12,10 @@ android {
         minSdk = 29
         targetSdk = 36
         versionCode = 1
-        versionName = "0.1.1"
+        versionName = rootProject.file("../../Cargo.toml").readText()
+            .substringAfter("[workspace.package]").substringBefore("\n[")
+            .lineSequence().first { it.trimStart().startsWith("version =") }
+            .substringAfter('=').trim().removeSurrounding("\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         resValue("string", "app_name", rootProject.file("../../branding/name.txt").readText().trim())
     }

@@ -136,6 +136,11 @@ def main():
                 print(step, flush=True)
                 if step == "desktop-text":
                     fixture("desktop tailnet text " + token)
+                elif step == "desktop-incremental":
+                    write_clipboard(("desktop incremental text " + token).encode())
+                    rows = command("history")["entries"]
+                    assert not any(row["direction"] == "send" and row["peer"] == phone_id
+                                   for row in rows), "Pull-only history must not create live delivery rows"
                 elif step == "phone-text-applied":
                     assert read_clipboard("UTF8_STRING") == ("phone tailnet text " + token).encode()
                 elif step == "phone-image-applied":

@@ -105,7 +105,7 @@ class Tray:
             except GLib.Error as error:
                 print(NAME + ' tray registration:', error.message, file=sys.stderr)
         self.connection.call(WATCHER, '/StatusNotifierWatcher', WATCHER, 'RegisterStatusNotifierItem',
-                             GLib.Variant('(s)', (self.name,)), None, Gio.DBusCallFlags.NONE, 3000, None, completed)
+                             GLib.Variant('(s)', (self.connection.get_unique_name(),)), None, Gio.DBusCallFlags.NONE, 3000, None, completed)
 
     def request(self, action):
         return control_request(self.path, action, timeout=3, max_response=1024 * 1024)

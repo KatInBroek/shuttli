@@ -15,6 +15,7 @@ import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import uniffi.shuttli_mobile_ffi.MobileHistoryActivity
 import uniffi.shuttli_mobile_ffi.MobileContentKind
 import uniffi.shuttli_mobile_ffi.MobileTransferState
 import java.io.ByteArrayOutputStream
@@ -66,9 +67,14 @@ class TailnetInstrumentedTest {
         checkpoint("desktop-text")
         remoteText("desktop tailnet text $token")
         assertEquals("phone clipboard sentinel", clipboardText())
+        await { state.snapshot.devices.any { it.id == peerId && it.historyActivity == MobileHistoryActivity.UPDATED } }
+        checkpoint("desktop-incremental")
+        remoteText("desktop incremental text $token")
+        assertTrue(state.snapshot.history.count { it.eventKey.startsWith(peerId) && it.available } >= 2)
+        assertEquals("phone clipboard sentinel", clipboardText())
         state.copyToPhone(state.snapshot.selected!!)
         await { state.snapshot.actionStatus == "copied_to_phone" }
-        assertEquals("desktop tailnet text $token", clipboardText())
+        assertEquals("desktop incremental text $token", clipboardText())
         state.selectHistory(null)
         await { state.snapshot.selected == null }
 
@@ -143,6 +149,7 @@ class TailnetInstrumentedTest {
         checkpoint("desktop-send-disabled")
         state.clearHistory()
         await { state.snapshot.history.none { it.eventKey.startsWith(peerId) } }
+        await { state.snapshot.devices.any { it.id == peerId && it.historyActivity == MobileHistoryActivity.DENIED } }
         Thread.sleep(20_000)
         assertTrue("desktop consent must gate history", state.snapshot.history.none { it.eventKey.startsWith(peerId) })
         checkpoint("desktop-send-reenabled")

@@ -10,4 +10,15 @@
 <string name="send_queued">Verzenden naar toegestane apparaten</string><string name="no_send_targets">Sta eerst verzenden naar een verbonden apparaat toe</string><string name="unsupported_image">Afbeelding te groot of niet ondersteund</string><string name="unsupported_text">Tekst te groot of niet ondersteund</string><string name="unsupported_clipboard">Klembordinhoud niet ondersteund</string><string name="copied_to_phone">Gekopieerd naar deze telefoon</string><string name="copy_uncertain">Kopiëren niet bevestigd</string><string name="policy_failed">Apparaattoestemming niet opgeslagen</string>
 <string name="transfer_queued">In wachtrij</string><string name="transfer_sending">Bezig met verzenden</string><string name="transfer_applied">Toegepast op apparaat</string><string name="transfer_failed">Mislukt</string><string name="transfer_unknown">Uitkomst onbekend</string>
 <string name="history_mode">Geschiedenismodus</string><string name="history_off">Uit</string><string name="history_status">Alleen status</string><string name="history_content">Inhoud</string><string name="history_limit">Maximum aantal</string><string name="apply_history_limit">Limiet toepassen</string><string name="history_limit_help">0–10.000 items. Nul stopt geschiedenisvragen; geheugen- en afbeeldingslimieten blijven gelden.</string><string name="settings_failed">Geschiedenisinstellingen niet opgeslagen</string>
+<string name="app_version">Appversie: %1$s</string>
+<string name="history_waiting">Wachten op geschiedenis</string>
+<string name="history_updating">Geschiedenislijst bijwerken</string>
+<string name="history_receiving">Inhoud ontvangen</string>
+<string name="history_updated">Geschiedenislijst bijgewerkt</string>
+<string name="history_denied">Toegang tot geschiedenis geweigerd</string>
+<string name="history_failed">Geschiedenis ophalen mislukt</string>
+<string name="history_paused">Ontvangst van geschiedenis gepauzeerd</string>
+<string name="history_unavailable">Geschiedenisbron niet beschikbaar</string>
+<string name="history_checked">Geschiedenis gecontroleerd: %1$s</string>
+<string name="history_partial">Een deel van de geschiedenis is nog niet beschikbaar</string>
 </resources>

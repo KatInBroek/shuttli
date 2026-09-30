@@ -114,6 +114,7 @@ fn peer(id: DeviceId, name: String, address: SocketAddr) -> PeerInfo {
         name: name.chars().filter(|c| !c.is_control()).take(64).collect(),
         address: address.to_string(),
         online: true,
+        capabilities: Capabilities::legacy_desktop(),
     }
 }
 struct Outbound {
@@ -328,13 +329,14 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> Duplex for T {}
 async fn selected(
     s: &Shared,
     tls: &mut impl Duplex,
-    info: PeerInfo,
+    mut info: PeerInfo,
     initiator: DeviceId,
     id: DeviceId,
     epoch: [u8; 16],
     capabilities: Capabilities,
 ) -> Result<Arc<std::sync::atomic::AtomicBool>> {
     let live = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    info.capabilities = capabilities;
     {
         let mut sessions = s.sessions.lock().await;
         sessions.retain(|_, v| v.live.load(Ordering::SeqCst));
@@ -651,6 +653,14 @@ async fn can_send_hints(s: &Shared, peer: DeviceId) -> Result<u64> {
         .map_err(|_| "application busy")?;
     application_reply(rx).await
 }
+fn history_error_code(error: &str) -> &'static str {
+    match error {
+        "Disabled" => "history_denied",
+        "stale history cursor" => "history_cursor_stale",
+        _ => "history_unavailable",
+    }
+}
+
 async fn visible_history_revision(s: &Shared, peer: DeviceId) -> Result<(u64, u64)> {
     let (reply, rx) = mpsc::sync_channel(1);
     s.events
@@ -695,7 +705,7 @@ async fn serve_v2_session(
                 report(
                     s,
                     &out,
-                    DeliveryState::Cancelled,
+                    DeliveryState::Failed,
                     "peer does not accept live offers".into(),
                 )
                 .await;
@@ -758,11 +768,15 @@ async fn serve_v2_session(
                     Ok((revision, page)) if revision == s.revision.load(Ordering::SeqCst) => {
                         write_v2_frame(tls, &page.into()).await?;
                     }
-                    _ => {
+                    result => {
                         write_v2_frame(
                             tls,
                             &FrameV2::Error {
-                                code: "history_unavailable".into(),
+                                code: result
+                                    .err()
+                                    .map(|error| history_error_code(&error))
+                                    .unwrap_or("history_denied")
+                                    .into(),
                             },
                         )
                         .await?
@@ -793,11 +807,15 @@ async fn serve_v2_session(
                             .map_err(|e| e.to_string())?;
                         tls.flush().await.map_err(|e| e.to_string())?;
                     }
-                    _ => {
+                    result => {
                         write_v2_frame(
                             tls,
                             &FrameV2::Error {
-                                code: "history_unavailable".into(),
+                                code: result
+                                    .err()
+                                    .map(|error| history_error_code(&error))
+                                    .unwrap_or("history_denied")
+                                    .into(),
                             },
                         )
                         .await?
@@ -1441,6 +1459,7 @@ mod delivery_tests {
                     name: "Synthetic".into(),
                     address: "fixture".into(),
                     online: true,
+                    capabilities: Capabilities::legacy_desktop(),
                 }))
                 .ok()
                 .unwrap();

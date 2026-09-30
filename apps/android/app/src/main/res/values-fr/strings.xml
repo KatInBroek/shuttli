@@ -10,4 +10,15 @@
 <string name="send_queued">Envoi aux appareils autorisés</string><string name="no_send_targets">Autorisez d’abord l’envoi à un appareil connecté</string><string name="unsupported_image">Image trop grande ou non prise en charge</string><string name="unsupported_text">Texte trop grand ou non pris en charge</string><string name="unsupported_clipboard">Contenu du presse-papiers non pris en charge</string><string name="copied_to_phone">Copié sur ce téléphone</string><string name="copy_uncertain">Copie non vérifiée</string><string name="policy_failed">Autorisation de l’appareil non enregistrée</string>
 <string name="transfer_queued">En attente</string><string name="transfer_sending">Envoi</string><string name="transfer_applied">Appliqué sur l’appareil</string><string name="transfer_failed">Échec</string><string name="transfer_unknown">Résultat inconnu</string>
 <string name="history_mode">Mode historique</string><string name="history_off">Désactivé</string><string name="history_status">Statut seul</string><string name="history_content">Contenu</string><string name="history_limit">Nombre maximal</string><string name="apply_history_limit">Appliquer la limite</string><string name="history_limit_help">0 à 10 000 éléments. Zéro arrête les requêtes; les limites de mémoire et d’image restent actives.</string><string name="settings_failed">Impossible d’enregistrer les réglages de l’historique</string>
+<string name="app_version">Version de l’application : %1$s</string>
+<string name="history_waiting">En attente de l’historique</string>
+<string name="history_updating">Mise à jour de la liste</string>
+<string name="history_receiving">Réception du contenu</string>
+<string name="history_updated">Liste de l’historique à jour</string>
+<string name="history_denied">Accès à l’historique refusé</string>
+<string name="history_failed">Impossible de récupérer l’historique</string>
+<string name="history_paused">Réception de l’historique suspendue</string>
+<string name="history_unavailable">Source de l’historique indisponible</string>
+<string name="history_checked">Historique vérifié : %1$s</string>
+<string name="history_partial">Une partie de l’historique reste indisponible</string>
 </resources>

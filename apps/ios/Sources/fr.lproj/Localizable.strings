@@ -62,3 +62,14 @@
 "apply_history_limit" = "Appliquer la limite";
 "history_limit_help" = "0 à 10 000 éléments. Zéro arrête les requêtes; les limites de mémoire et d’image restent actives.";
 "settings_unavailable" = "Impossible d’enregistrer les réglages de l’historique";
+"app_version" = "Version de l’application";
+"history_waiting" = "En attente de l’historique";
+"history_updating" = "Mise à jour de la liste";
+"history_receiving" = "Réception du contenu";
+"history_updated" = "Liste de l’historique à jour";
+"history_denied" = "Accès à l’historique refusé";
+"history_failed" = "Impossible de récupérer l’historique";
+"history_paused" = "Réception de l’historique suspendue";
+"history_unavailable" = "Source de l’historique indisponible";
+"history_checked" = "Historique vérifié : %@";
+"history_partial" = "Une partie de l’historique reste indisponible";

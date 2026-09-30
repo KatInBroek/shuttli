@@ -347,6 +347,10 @@ fn write_locale_assets(dir: &std::path::Path) -> Result<(), String> {
         shuttli_brand::NAME.as_bytes(),
     )?;
     files::atomic_write(
+        &dir.join("product-version.txt"),
+        shuttli_brand::VERSION.as_bytes(),
+    )?;
+    files::atomic_write(
         &dir.join("tray_icons.py"),
         shuttli_native_ui::TRAY_ICONS.as_bytes(),
     )?;

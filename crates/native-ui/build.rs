@@ -8,8 +8,9 @@ fn main() {
         std::fs::write(
             &brand,
             format!(
-                "enum ProductBrand {{ static let name = String(decoding: {:?}, as: UTF8.self) }}\n{}",
+                "enum ProductBrand {{ static let name = String(decoding: {:?}, as: UTF8.self); static let version = String(decoding: {:?}, as: UTF8.self) }}\n{}",
                 shuttli_brand::NAME.as_bytes(),
+                shuttli_brand::VERSION.as_bytes(),
                 std::fs::read_to_string("macos/ShuttliUI.swift").expect("read Swift UI")
             ),
         )

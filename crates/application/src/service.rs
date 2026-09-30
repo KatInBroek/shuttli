@@ -174,7 +174,12 @@ impl Service {
                                 }
                             }
                             if let Err(e) = self
-                                .publish(observation.publications, p, "automatic observation")
+                                .publish(
+                                    observation.publications,
+                                    p,
+                                    "automatic observation",
+                                    false,
+                                )
                                 .await
                             {
                                 self.state.borrow_mut().last_error = Some(e);
@@ -203,9 +208,42 @@ impl Service {
         permits: Vec<shuttli_core::sync::Publication>,
         payload: Payload,
         reason: &str,
+        record_local: bool,
     ) -> Result<usize> {
         let mut count = 0;
+        if record_local {
+            if let Some(permit) = permits.first() {
+                let event = permit.event();
+                let peer = self.device.clone();
+                let p = payload.clone();
+                let id = self
+                    .store
+                    .call(move |s| {
+                        s.record(
+                            event,
+                            &peer,
+                            "local",
+                            DeliveryState::Applied,
+                            &p,
+                            "Local clipboard copy",
+                        )
+                    })
+                    .await?;
+                if id != 0 {
+                    self.state.borrow_mut().sequence += 1;
+                }
+            }
+        }
         for permit in permits {
+            if self
+                .state
+                .borrow()
+                .peers
+                .iter()
+                .any(|p| p.id == format_id(permit.target()) && !p.capabilities.accept_live_offer)
+            {
+                continue;
+            }
             let event = permit.event();
             let target = format_id(permit.target());
             let peer = target.clone();
@@ -775,8 +813,16 @@ impl Service {
                     .core
                     .manual(v.stamp, &p.meta)
                     .map_err(|e| format!("{e:?}"))?;
-                let n = self.publish(permits, p, "explicit user command").await?;
-                done(&format!("Queued for {n} allowed device(s)"))
+                let n = self
+                    .publish(permits, p, "explicit user command", true)
+                    .await?;
+                if n == 0 {
+                    done(
+                        "No live clipboard transfer queued; permitted devices retrieve retained history",
+                    )
+                } else {
+                    done(&format!("Queued for {n} allowed device(s)"))
+                }
             }
             Action::History { offset, limit } => Answer::History {
                 entries: self
@@ -823,7 +869,8 @@ impl Service {
                         .core
                         .manual(written.stamp, &p.meta)
                         .map_err(|e| format!("{e:?}"))?;
-                    self.publish(permits, p, "explicit user command").await?;
+                    self.publish(permits, p, "explicit user command", true)
+                        .await?;
                 }
                 done("Copied history content to the system clipboard")
             }
@@ -841,8 +888,16 @@ impl Service {
                     .core
                     .manual(stamp, &p.meta)
                     .map_err(|e| format!("{e:?}"))?;
-                let n = self.publish(permits, p, "explicit user command").await?;
-                done(&format!("History queued as a new event for {n} device(s)"))
+                let n = self
+                    .publish(permits, p, "explicit user command", true)
+                    .await?;
+                if n == 0 {
+                    done(
+                        "No live clipboard transfer queued; permitted devices retrieve retained history",
+                    )
+                } else {
+                    done(&format!("History queued as a new event for {n} device(s)"))
+                }
             }
             Action::ClearHistory => {
                 self.store.call(|s| s.clear()).await?;

@@ -141,6 +141,8 @@ pub struct PeerInfo {
     pub name: String,
     pub address: String,
     pub online: bool,
+    #[serde(default = "crate::mobile::Capabilities::legacy_desktop")]
+    pub capabilities: crate::mobile::Capabilities,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ClipboardStamp {

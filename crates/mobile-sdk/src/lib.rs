@@ -26,10 +26,23 @@ pub struct TimelineItem {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HistoryActivity {
+    Waiting,
+    Updating,
+    Receiving,
+    Updated,
+    Denied,
+    Failed,
+    Paused,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SourceFreshness {
     pub checked_at_ms: u64,
     pub revision: u64,
     pub partial: bool,
+    pub activity: HistoryActivity,
+    pub receiving: Option<EventId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,6 +97,10 @@ impl MobileHistory {
     pub fn enter_background(&mut self) {
         self.active = false;
         self.generation = self.generation.wrapping_add(1);
+        for source in self.freshness.values_mut() {
+            source.activity = HistoryActivity::Paused;
+            source.receiving = None;
+        }
     }
     pub fn generation(&self) -> u64 {
         self.generation
@@ -130,6 +147,29 @@ impl MobileHistory {
     }
     pub fn source(&self, id: DeviceId) -> Option<SourceFreshness> {
         self.freshness.get(&id).copied()
+    }
+    pub fn source_activity(
+        &mut self,
+        generation: u64,
+        source: DeviceId,
+        activity: HistoryActivity,
+        receiving: Option<EventId>,
+    ) {
+        if !self.active
+            || generation != self.generation
+            || (self.freshness.len() >= 32 && !self.freshness.contains_key(&source))
+        {
+            return;
+        }
+        let entry = self.freshness.entry(source).or_insert(SourceFreshness {
+            checked_at_ms: 0,
+            revision: 0,
+            partial: false,
+            activity: HistoryActivity::Waiting,
+            receiving: None,
+        });
+        entry.activity = activity;
+        entry.receiving = receiving;
     }
     /// Authenticated transport must bind `source` to the TLS peer identity.
     /// Validate the full page before changing the visible timeline.
@@ -196,6 +236,8 @@ impl MobileHistory {
                 checked_at_ms,
                 revision: page.revision,
                 partial,
+                activity: HistoryActivity::Updating,
+                receiving: None,
             },
         );
         self.trim();

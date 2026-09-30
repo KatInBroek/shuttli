@@ -1,7 +1,7 @@
 //! Foreground-only mobile transport. The caller supplies a Tailscale IPv4
 //! address; no VPN/private API or public-interface listener is opened here.
 use crate::{
-    MobileHistory,
+    HistoryActivity, MobileHistory,
     peers::{Candidate, PeerDirectory},
 };
 use shuttli_identity::{Identity, device_id};
@@ -267,6 +267,9 @@ async fn accept_desktop(
         commands,
     )
     .await;
+    if let Ok(mut history) = context.history.lock() {
+        history.source_activity(generation, remote_id, HistoryActivity::Failed, None);
+    }
     context.routes.lock().await.remove(&remote_id);
     if let Ok(mut directory) = context.peers.lock() {
         directory.disconnected(remote_id);
@@ -388,29 +391,65 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
     let mut next_cursor = None;
     let mut body_budget = crate::MAX_SESSION_BYTES;
     let mut refresh = tokio::time::interval(Duration::from_secs(15));
+    refresh.tick().await;
+    let mut refresh_needed = true;
+    let mut request_started = Instant::now();
+    let mut frame_reader = FrameReader::default();
+    let mut deferred_command: Option<SendCommand> = None;
     loop {
-        tokio::select! {
-            _ = stop.changed() => { if *stop.borrow() { return Ok(()); } }
-            command = commands.recv(), if !pending_list && pending_body.is_none() => {
-                if let Some(command) = command {
-                    let outcome = if command.target != source { SendState::Failed } else { match timeout(Duration::from_secs(20), send_offer(stream, &command, context)).await {
+        if !pending_list && pending_body.is_none() && frame_reader.is_idle() {
+            if let Some(command) = deferred_command.take() {
+                let outcome = if command.target != source {
+                    SendState::Failed
+                } else {
+                    match timeout(
+                        Duration::from_secs(20),
+                        send_offer(stream, &command, context),
+                    )
+                    .await
+                    {
                         Ok(Ok(state)) => state,
                         _ => SendState::Unknown,
-                    }};
-                    if let Ok(mut results) = context.results.lock() {
-                        results.insert((command.event, command.target), outcome);
                     }
-                    if outcome == SendState::Unknown { return Err("outgoing transfer outcome unknown".into()); }
+                };
+                if let Ok(mut results) = context.results.lock() {
+                    results.insert((command.event, command.target), outcome);
                 }
+                if outcome == SendState::Unknown {
+                    return Err("outgoing transfer outcome unknown".into());
+                }
+            }
+        }
+        if refresh_needed && !pending_list && pending_body.is_none() && can_query(context, source) {
+            refresh_needed = false;
+            body_budget = crate::MAX_SESSION_BYTES;
+            history
+                .lock()
+                .map_err(|_| "history unavailable")?
+                .source_activity(generation, source, HistoryActivity::Updating, None);
+            write_frame(
+                stream,
+                &FrameV2::HistoryListRequest {
+                    cursor: None,
+                    limit: 20,
+                },
+            )
+            .await?;
+            pending_list = true;
+            request_started = Instant::now();
+        }
+        tokio::select! {
+            _ = stop.changed() => { if *stop.borrow() { return Ok(()); } }
+            command = commands.recv(), if !pending_list && pending_body.is_none() && deferred_command.is_none() => {
+                deferred_command = command;
             }
             _ = refresh.tick() => {
-                if !pending_list && pending_body.is_none() && can_query(context, source) {
-                    body_budget = crate::MAX_SESSION_BYTES;
-                    write_frame(stream, &FrameV2::HistoryListRequest { cursor: None, limit: 20 }).await?;
-                    pending_list = true;
+                refresh_needed = true;
+                if (pending_list || pending_body.is_some()) && request_started.elapsed() > Duration::from_secs(30) {
+                    return Err("history response timeout".into());
                 }
             }
-            frame = read_frame(stream) => {
+            frame = frame_reader.read(stream) => {
                 match frame? {
                     FrameV2::PeerList { revision, peers: hints } => {
                         peers.lock().map_err(|_| "peer directory unavailable")?
@@ -448,9 +487,15 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                         if let Some(event) = body_queue.pop_front() {
                             write_frame(stream, &FrameV2::HistoryGet { event }).await?;
                             pending_body = Some(event);
+                            request_started = Instant::now();
+                            history.lock().map_err(|_| "history unavailable")?.source_activity(generation, source, HistoryActivity::Receiving, Some(event));
                         } else if let Some(cursor) = next_cursor.take() {
                             write_frame(stream, &FrameV2::HistoryListRequest { cursor: Some(cursor), limit: 20 }).await?;
                             pending_list = true;
+                            request_started = Instant::now();
+                            history.lock().map_err(|_| "history unavailable")?.source_activity(generation, source, HistoryActivity::Updating, None);
+                        } else {
+                            history.lock().map_err(|_| "history unavailable")?.source_activity(generation, source, HistoryActivity::Updated, None);
                         }
                     }
                     FrameV2::HistoryBody { event, metadata } if pending_body == Some(event) => {
@@ -475,18 +520,26 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                         if let Some(event) = body_queue.pop_front() {
                             write_frame(stream, &FrameV2::HistoryGet { event }).await?;
                             pending_body = Some(event);
+                            request_started = Instant::now();
+                            history.lock().map_err(|_| "history unavailable")?.source_activity(generation, source, HistoryActivity::Receiving, Some(event));
                         } else if let Some(cursor) = next_cursor.take() {
                             write_frame(stream, &FrameV2::HistoryListRequest { cursor: Some(cursor), limit: 20 }).await?;
                             pending_list = true;
+                            request_started = Instant::now();
+                            history.lock().map_err(|_| "history unavailable")?.source_activity(generation, source, HistoryActivity::Updating, None);
+                        } else {
+                            history.lock().map_err(|_| "history unavailable")?.source_activity(generation, source, HistoryActivity::Updated, None);
                         }
                     }
                     FrameV2::HistoryChanged { .. } => {
-                        if !pending_list && pending_body.is_none() && can_query(context, source) {
-                            write_frame(stream, &FrameV2::HistoryListRequest { cursor: None, limit: 20 }).await?;
-                            pending_list = true;
-                        }
+                        refresh_needed = true;
                     }
-                    FrameV2::Error { .. } => {
+                    FrameV2::Error { code } => {
+                        let activity = if code == "history_denied" {
+                            HistoryActivity::Denied
+                        } else { HistoryActivity::Failed };
+                        history.lock().map_err(|_| "history unavailable")?.source_activity(generation, source, activity, None);
+                        if code == "history_cursor_stale" { refresh_needed = true; }
                         pending_list = false;
                         pending_body = None;
                         body_queue.clear();
@@ -654,6 +707,53 @@ async fn read_frame(stream: &mut (impl AsyncRead + Unpin)) -> Result<FrameV2> {
     FrameV2::decode(&bytes).map_err(str::to_owned)
 }
 
+/// Keep partial control bytes across timer/command branches of select!.
+#[derive(Default)]
+struct FrameReader {
+    header: [u8; 4],
+    header_len: usize,
+    bytes: Vec<u8>,
+    body_len: usize,
+}
+impl FrameReader {
+    fn is_idle(&self) -> bool {
+        self.header_len == 0
+    }
+    async fn read(&mut self, stream: &mut (impl AsyncRead + Unpin)) -> Result<FrameV2> {
+        while self.header_len < 4 {
+            let n = stream
+                .read(&mut self.header[self.header_len..])
+                .await
+                .map_err(|e| e.to_string())?;
+            if n == 0 {
+                return Err("history connection closed".into());
+            }
+            self.header_len += n;
+        }
+        if self.bytes.is_empty() {
+            let len = u32::from_be_bytes(self.header) as usize;
+            if len == 0 || len > shuttli_protocol::MAX_CONTROL_FRAME_BYTES {
+                return Err("invalid v2 frame size".into());
+            }
+            self.bytes.resize(len, 0);
+        }
+        while self.body_len < self.bytes.len() {
+            let n = stream
+                .read(&mut self.bytes[self.body_len..])
+                .await
+                .map_err(|e| e.to_string())?;
+            if n == 0 {
+                return Err("history connection closed".into());
+            }
+            self.body_len += n;
+        }
+        let bytes = std::mem::take(&mut self.bytes);
+        self.header_len = 0;
+        self.body_len = 0;
+        FrameV2::decode(&bytes).map_err(str::to_owned)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -662,6 +762,34 @@ mod tests {
         mobile::HistorySummary,
         sync::{Format, Metadata},
     };
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn partial_control_frame_survives_cancelled_read_future() {
+        let (mut remote, mut local) = tokio::io::duplex(1024);
+        let bytes = FrameV2::HistoryChanged { revision: 7 }.encode().unwrap();
+        let mut packet = (bytes.len() as u32).to_be_bytes().to_vec();
+        packet.extend(bytes);
+        let mut reader = FrameReader::default();
+        remote.write_all(&packet[..2]).await.unwrap();
+        assert!(
+            timeout(Duration::from_millis(5), reader.read(&mut local))
+                .await
+                .is_err()
+        );
+        assert!(!reader.is_idle());
+        remote.write_all(&packet[2..6]).await.unwrap();
+        assert!(
+            timeout(Duration::from_millis(5), reader.read(&mut local))
+                .await
+                .is_err()
+        );
+        remote.write_all(&packet[6..]).await.unwrap();
+        assert!(matches!(
+            reader.read(&mut local).await.unwrap(),
+            FrameV2::HistoryChanged { revision: 7 }
+        ));
+        assert!(reader.is_idle());
+    }
 
     #[test]
     fn listener_only_accepts_tailnet_ipv4() {
@@ -782,6 +910,9 @@ mod tests {
         write_frame(&mut desktop, &FrameV2::HistoryChanged { revision: 1 })
             .await
             .unwrap();
+        write_frame(&mut desktop, &FrameV2::HistoryChanged { revision: 2 })
+            .await
+            .unwrap();
         write_frame(
             &mut desktop,
             &FrameV2::HistoryListResponse {
@@ -828,6 +959,59 @@ mod tests {
                 .unwrap(),
             bytes
         );
+        assert!(matches!(
+            timeout(Duration::from_secs(1), read_frame(&mut desktop))
+                .await
+                .unwrap()
+                .unwrap(),
+            FrameV2::HistoryListRequest { cursor: None, .. }
+        ));
+        write_frame(
+            &mut desktop,
+            &FrameV2::HistoryListResponse {
+                source_epoch: epoch,
+                revision: 2,
+                items: vec![],
+                next: None,
+            },
+        )
+        .await
+        .unwrap();
+        timeout(Duration::from_secs(1), async {
+            while history.lock().unwrap().source(source).unwrap().activity
+                != HistoryActivity::Updated
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(history.lock().unwrap().timeline().len(), 1);
+        write_frame(&mut desktop, &FrameV2::HistoryChanged { revision: 3 })
+            .await
+            .unwrap();
+        assert!(matches!(
+            read_frame(&mut desktop).await.unwrap(),
+            FrameV2::HistoryListRequest { .. }
+        ));
+        write_frame(
+            &mut desktop,
+            &FrameV2::Error {
+                code: "history_denied".into(),
+            },
+        )
+        .await
+        .unwrap();
+        timeout(Duration::from_secs(1), async {
+            while history.lock().unwrap().source(source).unwrap().activity
+                != HistoryActivity::Denied
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(history.lock().unwrap().body_available(event));
         stop.send(true).unwrap();
         assert!(session.await.unwrap().is_ok());
         drop(command_sender);

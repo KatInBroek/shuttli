@@ -86,28 +86,24 @@ metadata window rather than requesting a strict revision delta. A fifteen-second
 foreground reconciliation provides recovery from missed hints. These mechanics
 are distinct from live desktop clipboard publication.
 
-The current implementation has status gaps that must be resolved before complete
-mobile UI acceptance:
+The implementation separates history reception from live clipboard delivery:
 
-- The desktop publication path creates an outgoing live-transfer record for a
-  pull-only peer; the network adapter subsequently marks it Cancelled because
-  that peer does not accept live offers. A normal negotiated receiving mode is
-  not a cancellation or a failed history reception. Filter unsupported live
-  targets before enqueueing and recording a live transfer, while retaining local
-  copies and current-policy history access. Mixed desktop/mobile peer sets must
-  retain ordinary desktop delivery.
-- Source freshness currently records metadata-page checks. Native bindings expose
-  device connectivity and item availability, but do not expose a complete
-  per-source query/body activity and error snapshot. Connectivity alone does not
-  establish permission, history freshness or content reception.
-- A history Error frame clears pending requests without preserving a classified
-  source error for presentation. Keep useful cached rows and distinguish denied,
-  unavailable, stale-cursor recovery and body failure from a successfully empty
-  response. Never expose sensitive payloads in diagnostics or notifications.
-- A history-change hint arriving during a pending list/body request is currently
-  ignored and recovered by later reconciliation. Coalesce it as pending work and
-  query again after the current request completes. Repeated hints must not create
-  overlapping requests, duplicate rows or repeated downloads of cached bodies.
+- Desktop publication filters negotiated pull-only peers before queueing or
+  recording a live transfer. Local-origin copies remain in retained history for
+  current-policy queries, including explicit sends; compatible desktop peers
+  still receive ordinary live transfers. A pull-only peer does not produce a
+  synthetic cancellation.
+- Shared SDK snapshots expose per-source metadata/body activity, last metadata
+  check, incomplete results and the particular body currently being received.
+  Native bindings expose these facts independently of connection status and
+  cached item availability.
+- History errors retain cached content and classify denied access, failed queries
+  and stale-cursor reconciliation. A failed request is not a successful empty
+  response. Diagnostics contain no clipboard payloads.
+- Change hints received during a list/body request are coalesced and reconciled
+  after pending work completes. Periodic reconciliation recovers missed hints.
+  Partial control-frame reads survive cancellation by timer/command selection;
+  foreground requests have bounded timeouts.
 
 Use independent status facts rather than one overloaded synchronization result:
 
