@@ -732,6 +732,26 @@ async fn live_and_pull_interleave_in_both_identity_orders_without_forwarding_or_
                 FrameV2::Poll
             ));
         }
+        // Recovery may query an event from before the sender restarted.
+        let previous = EventId {
+            origin: source,
+            epoch: [9; 16],
+            seq: 1,
+        };
+        write_frame(&mut remote, &FrameV2::Status { event: previous })
+            .await
+            .unwrap();
+        assert!(matches!(
+            read_frame(&mut remote).await.unwrap(),
+            FrameV2::Receipt { event: queried, state: Some(shuttli_model::sync::DeliveryState::Unknown) }
+                if queried == previous
+        ));
+        if !desktop_leads {
+            assert!(matches!(
+                read_frame(&mut remote).await.unwrap(),
+                FrameV2::Poll
+            ));
+        }
         let event = EventId {
             origin: source,
             epoch,
@@ -924,6 +944,23 @@ async fn original_v1_tls_peer_can_send_and_receive_with_app_cache_adapter() {
         read_live_frame(&mut remote, WireVersion::V1).await.unwrap(),
         FrameV2::Select { .. }
     ));
+    let previous = EventId {
+        origin: source,
+        epoch: [9; 16],
+        seq: 1,
+    };
+    write_live_frame(
+        &mut remote,
+        &FrameV2::Status { event: previous },
+        WireVersion::V1,
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        read_live_frame(&mut remote, WireVersion::V1).await.unwrap(),
+        FrameV2::Receipt { event: queried, state: Some(shuttli_model::sync::DeliveryState::Unknown) }
+            if queried == previous
+    ));
     let event = EventId {
         origin: source,
         epoch: [3; 16],
@@ -1033,6 +1070,17 @@ async fn original_v1_tls_peer_can_send_and_receive_with_app_cache_adapter() {
             ..
         }
     ));
+    let forged = EventId {
+        origin: context.identity.id,
+        ..previous
+    };
+    write_live_frame(
+        &mut remote,
+        &FrameV2::Status { event: forged },
+        WireVersion::V1,
+    )
+    .await
+    .unwrap();
+    assert_eq!(server.await.unwrap().unwrap_err(), "receipt owner mismatch");
     stop.send(true).unwrap();
-    assert!(server.await.unwrap().is_ok());
 }

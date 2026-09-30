@@ -713,12 +713,7 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                         pending_poll = false;
                     }
                     FrameV2::Status { event } if !pending_list && pending_body.is_none() => {
-                        if event.origin != source || event.epoch != source_epoch {
-                            return Err("receipt identity mismatch".into());
-                        }
-                        let state = if history.lock().map_err(|_| "history unavailable")?.body_available(event) {
-                            shuttli_model::sync::DeliveryState::Applied
-                        } else { shuttli_model::sync::DeliveryState::Unknown };
+                        let state = receipt_state(context, source, event)?;
                         write_frame(stream, &FrameV2::Receipt { event, state: Some(state) }).await?;
                         pending_poll = false;
                     }
@@ -797,19 +792,7 @@ async fn live_v1_session<S: AsyncRead + AsyncWrite + Unpin>(
                 .map_err(|_| "receive timeout")??;
             }
             FrameV2::Status { event } => {
-                if event.origin != source || event.epoch != source_epoch {
-                    return Err("receipt owner mismatch".into());
-                }
-                let state = if context
-                    .history
-                    .lock()
-                    .map_err(|_| "history unavailable")?
-                    .body_available(event)
-                {
-                    shuttli_model::sync::DeliveryState::Applied
-                } else {
-                    shuttli_model::sync::DeliveryState::Unknown
-                };
+                let state = receipt_state(context, source, event)?;
                 write_live_frame(
                     stream,
                     &FrameV2::Receipt {
@@ -826,6 +809,29 @@ async fn live_v1_session<S: AsyncRead + AsyncWrite + Unpin>(
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
     }
+}
+fn receipt_state(
+    context: &SessionContext,
+    source: DeviceId,
+    event: EventId,
+) -> Result<shuttli_model::sync::DeliveryState> {
+    // Recovery can query a previous epoch after a sender restart. Identity
+    // ownership still applies; a missing session cache cannot confirm success.
+    if event.origin != source || event.seq == 0 {
+        return Err("receipt owner mismatch".into());
+    }
+    Ok(
+        if context
+            .history
+            .lock()
+            .map_err(|_| "history unavailable")?
+            .body_available(event)
+        {
+            shuttli_model::sync::DeliveryState::Applied
+        } else {
+            shuttli_model::sync::DeliveryState::Unknown
+        },
+    )
 }
 async fn execute_v1_send<S: AsyncRead + AsyncWrite + Unpin>(
     stream: &mut S,
