@@ -51,10 +51,10 @@ class TailnetInstrumentedTest {
         fun setText(text: String) = rule.runOnUiThread {
             clipboard.setPrimaryClip(ClipData.newPlainText("fixture", text))
         }
-        fun remoteText(text: String) {
-            await { state.snapshot.history.any { it.eventKey.startsWith(peerId) && it.kind == MobileContentKind.TEXT && it.available } }
+        fun remoteText(text: String, source: String = peerId) {
+            await { state.snapshot.history.any { it.eventKey.startsWith(source) && it.kind == MobileContentKind.TEXT && it.available } }
             await {
-                val row = state.snapshot.history.firstOrNull { it.eventKey.startsWith(peerId) && it.kind == MobileContentKind.TEXT && it.available }
+                val row = state.snapshot.history.firstOrNull { it.eventKey.startsWith(source) && it.kind == MobileContentKind.TEXT && it.available }
                 if (row != null && state.snapshot.selected?.eventKey != row.eventKey) state.selectHistory(row)
                 state.snapshot.preview?.toString(Charsets.UTF_8) == text
             }
@@ -152,13 +152,10 @@ class TailnetInstrumentedTest {
             assertTrue(secondId.matches(Regex("[0-9a-f]{64}")))
             checkpoint("multiple-sources")
             await { state.snapshot.devices.any { it.id == secondId && it.online } }
-            await { state.snapshot.history.any { it.eventKey.startsWith(secondId) && it.available } }
-            val secondRow = state.snapshot.history.first { it.eventKey.startsWith(secondId) && it.available }
+            remoteText("second desktop text $token", secondId)
+            val secondRow = state.snapshot.selected!!
             val firstRow = state.snapshot.history.first { it.eventKey.startsWith(peerId) && it.available }
             assertNotEquals(firstRow.sourceName, secondRow.sourceName)
-            state.selectHistory(secondRow)
-            await { state.snapshot.selected?.eventKey == secondRow.eventKey &&
-                state.snapshot.preview?.toString(Charsets.UTF_8) == "second desktop text $token" }
             assertEquals(state.snapshot.history.size, state.snapshot.history.map { it.eventKey }.distinct().size)
             assertFalse(state.snapshot.devices.first { it.id == secondId }.send)
             checkpoint("multiple-sources-merged")
