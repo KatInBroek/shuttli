@@ -3,6 +3,14 @@ import UIKit
 @testable import Shuttli
 
 final class AppStateTests: XCTestCase {
+    func testNativeIdentityCanBeCreatedAndReloaded() {
+        let first = DeviceIdentityStore.loadOrCreate()
+        XCTAssertNotNil(first, "The actual Keychain identity path must work in the simulator")
+        guard let first else { return }
+        XCTAssertFalse(first.isEmpty)
+        XCTAssertTrue(DeviceIdentityStore.loadOrCreate() == first, "Reload must preserve the same identity")
+    }
+
     @MainActor
     func testSendStatusSettlesFromRealReceipts() {
         XCTAssertEqual(AppState.sendStatus([.queued]), "send_queued")

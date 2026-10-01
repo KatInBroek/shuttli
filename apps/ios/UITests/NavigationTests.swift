@@ -52,6 +52,10 @@ final class NavigationTests: XCTestCase {
         capture(app, "devices")
         app.tabBars.buttons["Settings"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "This phone")).firstMatch.exists)
+        let fingerprint = app.staticTexts["identity-fingerprint"]
+        XCTAssertTrue(fingerprint.exists)
+        XCTAssertEqual(fingerprint.label.filter { $0.isHexDigit }.count, 64,
+                       "Settings must show a real fingerprint rather than a blank identity")
         XCTAssertFalse(app.staticTexts["Send clipboard"].exists)
         capture(app, "settings")
         app.swipeUp()

@@ -14,5 +14,5 @@ raise SystemExit("No available iPhone simulator")
 xcodebuild -project apps/ios/Shuttli.xcodeproj -scheme Shuttli \
     -destination "platform=iOS Simulator,id=$simulator_id" \
     -derivedDataPath target/ios-derived -resultBundlePath target/ios-tests.xcresult \
-    CODE_SIGNING_ALLOWED=NO -enableCodeCoverage YES test
+    CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- -enableCodeCoverage YES test
 xcrun xccov view --report --json target/ios-tests.xcresult > target/ios-coverage.json

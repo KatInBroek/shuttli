@@ -347,7 +347,9 @@ private struct SettingsView: View {
                 Section("this_phone") {
                     Text(UIDevice.current.name).font(.headline)
                     Text("device_fingerprint").font(.caption).foregroundStyle(.secondary)
-                    Text(fingerprint(state.fingerprint)).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                    Text(state.fingerprint.isEmpty ? localized("identity_unavailable") : fingerprint(state.fingerprint))
+                        .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                        .accessibilityIdentifier("identity-fingerprint")
                     Text("manual_clipboard_help").font(.caption).foregroundStyle(.secondary)
                 }
                 Section("history_mode") {
