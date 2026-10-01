@@ -107,8 +107,8 @@ private fun HistoryPage(data: UiSnapshot, state: MobileAppState) {
             Column(Modifier.fillMaxWidth().padding(vertical = 48.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(AppIcon.Copy.vector, null, Modifier.size(36.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(12.dp))
-                Text(stringResource(R.string.history_empty), style = MaterialTheme.typography.titleMedium)
-                Text(stringResource(R.string.history_empty_help), style = MaterialTheme.typography.bodySmall,
+                Text(stringResource(if (filter == 0) R.string.history_empty else R.string.history_empty_filtered), style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(if (filter == 0) R.string.history_empty_help else R.string.history_empty_filtered_help), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
             }
         }
@@ -208,7 +208,7 @@ private fun SendPanel(data: UiSnapshot, state: MobileAppState, activity: Activit
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(R.string.send_clipboard), style = MaterialTheme.typography.titleSmall)
                     Row(Modifier.clickable { showTargets = true }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(stringResource(if (data.draft == null) R.string.devices_can_receive else R.string.to_devices, targets.size), style = MaterialTheme.typography.bodySmall)
+                        Text(stringResource(if (data.draft != null) R.string.to_devices else if (targets.size == 1) R.string.device_can_receive else R.string.devices_can_receive, targets.size), style = MaterialTheme.typography.bodySmall)
                         if (data.draft != null) Icon(AppIcon.Down.vector, null, Modifier.size(16.dp))
                     }
                 }
@@ -401,6 +401,7 @@ private fun historyActivityText(state: MobileHistoryActivity): String = stringRe
     MobileHistoryActivity.FAILED -> R.string.history_failed
     MobileHistoryActivity.PAUSED -> R.string.history_paused
     MobileHistoryActivity.UNAVAILABLE -> R.string.history_unavailable
+    MobileHistoryActivity.UNSUPPORTED -> R.string.history_unsupported
 })
 
 @Composable

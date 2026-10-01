@@ -91,7 +91,7 @@
     <string name="connection">Verbinding</string>
     <string name="receiving">Ontvangen</string>
     <string name="sending">Verzenden</string>
-    <string name="receive_help">Haal recente geschiedenis op terwijl de app open is. Kopieën blijven in de app totdat je op Kopiëren tikt.</string>
+    <string name="receive_help">Ontvang nieuwe kopieën en haal recente geschiedenis op terwijl deze app open is. Kopieën blijven in de app totdat je op Kopiëren tikt.</string>
     <string name="send_help">Verzenden is altijd handmatig. Eerst Plakken, dan Verzenden.</string>
     <string name="device_fingerprint">Apparaatvingerafdruk</string>
     <string name="confirm_device">Dit apparaat bevestigen</string>
@@ -105,4 +105,8 @@
     <string name="language">Taal</string>
     <string name="system_language">Systeemstandaard</string>
     <string name="send_partial">Sommige apparaten hebben niet bevestigd; controleer hun status</string>
+    <string name="history_unsupported">Werk de client op dit apparaat bij om geschiedenis op te halen</string>
+    <string name="device_can_receive">%1$d apparaat kan ontvangen</string>
+    <string name="history_empty_filtered">Geen overeenkomende kopieën</string>
+    <string name="history_empty_filtered_help">Geen recente kopieën komen overeen met dit filter.</string>
 </resources>

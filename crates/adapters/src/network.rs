@@ -8,8 +8,10 @@ use shuttli_core::sync::Publication;
 use shuttli_model::mobile::{Capabilities, PeerHint, PeerList};
 use shuttli_model::sync::*;
 use shuttli_ports::sync::{Network, NetworkEvent, Payload, Result};
-use shuttli_protocol::{FrameV2, Hello, decode_hello, encode_hello};
-use shuttli_transport::{read_frame as read_v2_frame, write_frame as write_v2_frame};
+use shuttli_protocol::{FrameV2, Hello};
+use shuttli_transport::{
+    read_frame as read_v2_frame, read_hello, write_frame as write_v2_frame, write_hello,
+};
 use std::{
     collections::{HashMap, VecDeque},
     net::{IpAddr, SocketAddr},
@@ -30,23 +32,6 @@ use tokio_rustls::{TlsAcceptor, TlsConnector};
 const PORT: u16 = 45987;
 const DEADLINE: Duration = Duration::from_secs(20);
 use shuttli_protocol::FrameV1 as Frame;
-async fn write_hello(s: &mut (impl AsyncWrite + Unpin), hello: &Hello) -> Result<()> {
-    let bytes = encode_hello(hello).map_err(str::to_owned)?;
-    s.write_u32(bytes.len() as u32)
-        .await
-        .map_err(|e| e.to_string())?;
-    s.write_all(&bytes).await.map_err(|e| e.to_string())?;
-    s.flush().await.map_err(|e| e.to_string())
-}
-async fn read_hello(s: &mut (impl AsyncRead + Unpin)) -> Result<Hello> {
-    let len = s.read_u32().await.map_err(|e| e.to_string())? as usize;
-    if len == 0 || len > shuttli_protocol::MAX_CONTROL_FRAME_BYTES {
-        return Err("invalid hello size".into());
-    }
-    let mut bytes = vec![0; len];
-    s.read_exact(&mut bytes).await.map_err(|e| e.to_string())?;
-    decode_hello(&bytes).map_err(str::to_owned)
-}
 /// Time out idle polls before consuming bytes. Once a frame starts, finish it
 /// within the transfer deadline or close the session rather than retry mid-frame.
 async fn read_v2_frame_or_idle(
@@ -697,14 +682,6 @@ async fn can_send_hints(s: &Shared, peer: DeviceId) -> Result<u64> {
         .map_err(|_| "application busy")?;
     application_reply(rx).await
 }
-fn history_error_code(error: &str) -> &'static str {
-    match error {
-        "Disabled" => "history_denied",
-        "stale history cursor" => "history_cursor_stale",
-        _ => "history_unavailable",
-    }
-}
-
 async fn visible_history_revision(s: &Shared, peer: DeviceId) -> Result<(u64, u64)> {
     let (reply, rx) = mpsc::sync_channel(1);
     s.events
@@ -743,6 +720,7 @@ async fn serve_v2_session(
         capabilities.accept_live_offer && shuttli_transport::leads_session(s.identity.id, id);
     let mut last_roster: Option<Vec<PeerHint>> = None;
     let mut roster_revision = 0u64;
+    let mut renew_roster = Instant::now();
     let mut last_history_revision: Option<(u64, u64)> = None;
     let mut next_roster_check = Instant::now();
     while live.load(Ordering::SeqCst) {
@@ -762,7 +740,7 @@ async fn serve_v2_session(
             match can_send_hints(s, id).await {
                 Ok(revision) if revision == s.revision.load(Ordering::SeqCst) => {
                     let roster = direct_roster(s, id).await;
-                    if last_roster.as_ref() != Some(&roster) {
+                    if last_roster.as_ref() != Some(&roster) || Instant::now() >= renew_roster {
                         roster_revision = roster_revision.saturating_add(1);
                         write_v2_frame(
                             tls,
@@ -773,6 +751,7 @@ async fn serve_v2_session(
                         )
                         .await?;
                         last_roster = Some(roster);
+                        renew_roster = Instant::now() + Duration::from_secs(30);
                     }
                 }
                 _ => last_roster = None,
@@ -805,20 +784,30 @@ async fn serve_v2_session(
             }
             write_v2_frame(tls, &FrameV2::Poll).await?;
         }
-        let Some(frame) = read_v2_frame_or_idle(
-            tls,
-            if leader {
-                DEADLINE
-            } else {
-                Duration::from_secs(5)
-            },
-        )
-        .await?
-        else {
-            if leader {
-                return Err("live response timeout".into());
+        let frame = loop {
+            let Some(frame) = read_v2_frame_or_idle(
+                tls,
+                if leader {
+                    DEADLINE
+                } else {
+                    Duration::from_secs(5)
+                },
+            )
+            .await?
+            else {
+                if leader {
+                    return Err("live response timeout".into());
+                }
+                continue;
+            };
+            if matches!(
+                frame,
+                FrameV2::PeerList { .. } | FrameV2::HistoryChanged { .. }
+            ) {
+                shuttli_transport::validate_notice(&frame, s.identity.id, id)?;
+                continue;
             }
-            continue;
+            break frame;
         };
         match frame {
             FrameV2::Idle if leader => {}
@@ -847,24 +836,13 @@ async fn serve_v2_session(
                         reply,
                     })
                     .map_err(|_| "application busy")?;
-                match application_reply(rx).await {
-                    Ok((revision, page)) if revision == s.revision.load(Ordering::SeqCst) => {
-                        write_v2_frame(tls, &page.into()).await?;
-                    }
-                    result => {
-                        write_v2_frame(
-                            tls,
-                            &FrameV2::Error {
-                                code: result
-                                    .err()
-                                    .map(|error| history_error_code(&error))
-                                    .unwrap_or("history_denied")
-                                    .into(),
-                            },
-                        )
-                        .await?
-                    }
-                }
+                let result = application_reply(rx).await.map(|(revision, page)| {
+                    (revision, shuttli_transport::history::Export::List(page))
+                });
+                shuttli_transport::history::respond(tls, result, |revision| {
+                    revision == s.revision.load(Ordering::SeqCst)
+                })
+                .await?;
             }
             FrameV2::HistoryGet { event } if capabilities.history_pull => {
                 let (reply, rx) = mpsc::sync_channel(1);
@@ -875,35 +853,24 @@ async fn serve_v2_session(
                         reply,
                     })
                     .map_err(|_| "application busy")?;
-                match application_reply(rx).await {
-                    Ok((revision, payload)) if revision == s.revision.load(Ordering::SeqCst) => {
-                        write_v2_frame(
-                            tls,
-                            &FrameV2::HistoryBody {
-                                event,
-                                metadata: payload.meta.clone(),
-                            },
-                        )
-                        .await?;
-                        tls.write_all(&payload.data)
-                            .await
-                            .map_err(|e| e.to_string())?;
-                        tls.flush().await.map_err(|e| e.to_string())?;
-                    }
-                    result => {
-                        write_v2_frame(
-                            tls,
-                            &FrameV2::Error {
-                                code: result
-                                    .err()
-                                    .map(|error| history_error_code(&error))
-                                    .unwrap_or("history_denied")
-                                    .into(),
-                            },
-                        )
-                        .await?
-                    }
-                }
+                let result = application_reply(rx).await.map(|(revision, payload)| {
+                    (
+                        revision,
+                        shuttli_transport::history::Export::Body {
+                            event,
+                            metadata: payload.meta,
+                            bytes: payload.data,
+                        },
+                    )
+                });
+                timeout(
+                    DEADLINE,
+                    shuttli_transport::history::respond(tls, result, |revision| {
+                        revision == s.revision.load(Ordering::SeqCst)
+                    }),
+                )
+                .await
+                .map_err(|_| "history export timed out")??;
             }
             FrameV2::Offer { event, meta } => {
                 timeout(DEADLINE, receive_transfer(s, tls, id, event, meta, true))
@@ -927,7 +894,7 @@ async fn send_pending_v2(s: &Shared, tls: &mut impl Duplex, out: Outbound) -> Re
             out.permit.metadata(),
             &out.payload.data,
             || s.revision.load(Ordering::SeqCst) == out.permit.policy_revision(),
-            |_| Err("unexpected notice during transfer".into()),
+            |frame| shuttli_transport::validate_notice(&frame, s.identity.id, out.permit.target()),
             || {},
         ),
     )
@@ -1473,10 +1440,12 @@ mod tests {
     #[test]
     fn unknown_fields_and_versions_are_rejected() {
         assert!(
-            decode_hello(br#"{"type":"hello","version":1,"name":"n","required":"unknown"}"#)
-                .is_err()
+            shuttli_protocol::decode_hello(
+                br#"{"type":"hello","version":1,"name":"n","required":"unknown"}"#
+            )
+            .is_err()
         );
-        assert!(decode_hello(br#"{"type":"hello","version":4}"#).is_err());
+        assert!(shuttli_protocol::decode_hello(br#"{"type":"hello","version":4}"#).is_err());
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -4,6 +4,34 @@ use shuttli_model::sync::{DeviceId, EventId, Format, Metadata};
 use shuttli_protocol::FrameV2;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+pub mod history;
+
+pub async fn write_hello(
+    stream: &mut (impl AsyncWrite + Unpin),
+    hello: &shuttli_protocol::Hello,
+) -> Result<()> {
+    let bytes = shuttli_protocol::encode_hello(hello).map_err(str::to_owned)?;
+    stream
+        .write_u32(bytes.len() as u32)
+        .await
+        .map_err(|e| e.to_string())?;
+    stream.write_all(&bytes).await.map_err(|e| e.to_string())?;
+    stream.flush().await.map_err(|e| e.to_string())
+}
+
+pub async fn read_hello(stream: &mut (impl AsyncRead + Unpin)) -> Result<shuttli_protocol::Hello> {
+    let len = stream.read_u32().await.map_err(|e| e.to_string())? as usize;
+    if len == 0 || len > shuttli_protocol::MAX_CONTROL_FRAME_BYTES {
+        return Err("invalid hello size".into());
+    }
+    let mut bytes = vec![0; len];
+    stream
+        .read_exact(&mut bytes)
+        .await
+        .map_err(|e| e.to_string())?;
+    shuttli_protocol::decode_hello(&bytes).map_err(str::to_owned)
+}
+
 pub type Result<T> = std::result::Result<T, String>;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -95,6 +123,26 @@ pub async fn read_live_frame(
 /// symmetric and independent of OS, form factor and connection initiator.
 pub fn leads_session(own: DeviceId, peer: DeviceId) -> bool {
     own < peer
+}
+
+/// Unsolicited notices do not finish a request turn or acknowledge a transfer.
+pub fn validate_notice(frame: &FrameV2, own: DeviceId, peer: DeviceId) -> Result<()> {
+    match frame {
+        FrameV2::PeerList { revision, peers }
+            if shuttli_protocol::valid_peer_list(
+                &shuttli_model::mobile::PeerList {
+                    revision: *revision,
+                    peers: peers.clone(),
+                },
+                peer,
+                own,
+            ) =>
+        {
+            Ok(())
+        }
+        FrameV2::HistoryChanged { revision } if *revision > 0 => Ok(()),
+        _ => Err("invalid session notice".into()),
+    }
 }
 
 pub async fn write_frame(stream: &mut (impl AsyncWrite + Unpin), frame: &FrameV2) -> Result<()> {

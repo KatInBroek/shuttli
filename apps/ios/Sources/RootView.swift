@@ -58,7 +58,7 @@ private struct HistoryView: View {
                         }.card()
                     }
                     if filtered.isEmpty {
-                        EmptyState(symbol: "doc.on.doc", title: "history_empty", detail: "history_empty_help")
+                        EmptyState(symbol: "doc.on.doc", title: filter == 0 ? "history_empty" : "history_empty_filtered", detail: filter == 0 ? "history_empty_help" : "history_empty_filtered_help")
                             .frame(maxWidth: .infinity).padding(.vertical, 40)
                     }
                     ForEach(filtered, id: \.eventKey) { row in HistoryCard(row: row) }
@@ -151,7 +151,7 @@ private struct SendPanel: View {
                     Text("send_clipboard").font(.headline)
                     Button { showTargets = true } label: {
                         HStack(spacing: 4) {
-                            Text(String(format: localized(hasDraft ? "to_devices" : "devices_can_receive"), state.allowedSendCount))
+                            Text(String(format: localized(hasDraft ? "to_devices" : (state.allowedSendCount == 1 ? "device_can_receive" : "devices_can_receive")), state.allowedSendCount))
                             if hasDraft { Image(systemName: "chevron.down").font(.caption2) }
                         }.font(.caption)
                     }.foregroundStyle(.secondary)
@@ -427,6 +427,7 @@ private extension MobileHistoryActivity {
         case .failed: "history_failed"
         case .paused: "history_paused"
         case .unavailable: "history_unavailable"
+        case .unsupported: "history_unsupported"
         }
     }
 }

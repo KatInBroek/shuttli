@@ -37,7 +37,7 @@ fn overlapping_rosters_expire_per_source_without_granting_send() {
             20,
         )
         .unwrap();
-    assert_eq!(directory.candidates().len(), 3);
+    assert_eq!(directory.candidates().len(), 2);
     directory.expire(1 + HINT_TTL_MS);
     assert_eq!(directory.candidates().len(), 2);
     let target = hint(4);
@@ -122,7 +122,8 @@ fn forged_and_stale_rosters_cannot_change_trust_or_permissions() {
         Err(DirectoryError::StaleRevision)
     );
     directory.disconnected(h.id);
-    assert!(directory.candidates().is_empty());
+    assert_eq!(directory.candidates().len(), 1);
+    assert_eq!(directory.candidates()[0].hint.id, h.id);
     assert_eq!(
         directory.direct()[0].directions,
         Directions {

@@ -11,17 +11,14 @@ use std::{
     collections::BTreeMap,
     net::Ipv4Addr,
     path::Path,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::{Arc, Mutex},
 };
 
 uniffi::setup_scaffolding!();
 
 #[uniffi::export]
 pub fn sdk_api_version() -> u32 {
-    6
+    7
 }
 
 #[derive(Clone, uniffi::Enum)]
@@ -34,6 +31,7 @@ pub enum MobileHistoryActivity {
     Failed,
     Paused,
     Unavailable,
+    Unsupported,
 }
 
 impl From<shuttli_mobile_sdk::HistoryActivity> for MobileHistoryActivity {
@@ -167,7 +165,6 @@ pub struct MobileSession {
     saved_directions: Mutex<BTreeMap<shuttli_model::sync::DeviceId, Directions>>,
     listener: Mutex<Option<MobileTransport>>,
     results: SendResults,
-    sequence: AtomicU64,
 }
 
 #[uniffi::export]
@@ -180,7 +177,6 @@ impl MobileSession {
             saved_directions: Mutex::new(BTreeMap::new()),
             listener: Mutex::new(None),
             results: Arc::new(Mutex::new(BTreeMap::new())),
-            sequence: AtomicU64::new(1),
         }
     }
 
@@ -384,6 +380,9 @@ impl MobileSession {
     pub fn clear_history(&self) {
         self.history.lock().expect("mobile session lock").clear();
         self.results.lock().expect("mobile results lock").clear();
+        if let Some(listener) = self.listener.lock().expect("mobile listener lock").as_ref() {
+            listener.request_refresh();
+        }
     }
 
     pub fn device_rows(&self) -> Vec<MobileDeviceRow> {
@@ -404,6 +403,8 @@ impl MobileSession {
                             MobileHistoryActivity::Paused
                         } else if !peer.online {
                             MobileHistoryActivity::Unavailable
+                        } else if !peer.capabilities.history_pull {
+                            MobileHistoryActivity::Unsupported
                         } else {
                             freshness.map_or(MobileHistoryActivity::Waiting, |s| s.activity.into())
                         };
@@ -639,24 +640,7 @@ impl MobileSession {
         let Some(directory) = directory.as_ref() else {
             return 0;
         };
-        let directory = directory.lock().expect("mobile directory lock");
-        let targets: Vec<_> = directory
-            .direct()
-            .into_iter()
-            .filter(|p| p.online && p.directions.send && p.directions.allows(format))
-            .collect();
-        if targets.is_empty() {
-            return 0;
-        }
-        let seq = self.sequence.fetch_add(1, Ordering::SeqCst);
-        if seq == 0 || seq == u64::MAX {
-            return 0;
-        }
-        let event = EventId {
-            origin: directory.own_id(),
-            epoch: listener.epoch(),
-            seq,
-        };
+        let mut directory = directory.lock().expect("mobile directory lock");
         let metadata = Metadata {
             format,
             size: bytes.len() as u64,
@@ -665,13 +649,17 @@ impl MobileSession {
                 Err(_) => return 0,
             },
         };
+        let permits = match directory.manual(&metadata) {
+            Ok(permits) if !permits.is_empty() => permits,
+            _ => return 0,
+        };
+        let event = permits[0].event();
         let mut queued = 0;
         let mut results = self.results.lock().expect("mobile results lock");
-        for target in targets {
+        for permit in permits {
+            let target = permit.target();
             let command = SendCommand {
-                event,
-                target: target.id,
-                metadata: metadata.clone(),
+                permit: Arc::new(permit),
                 body: bytes.clone(),
             };
             let state = if listener.enqueue(command) {
@@ -680,7 +668,7 @@ impl MobileSession {
             } else {
                 SendState::Failed
             };
-            results.insert((event, target.id), state);
+            results.insert((event, target), state);
         }
         while results.len() > 100 {
             results.pop_first();

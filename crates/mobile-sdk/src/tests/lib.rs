@@ -129,7 +129,7 @@ fn live_commit_is_verified_idempotent_bounded_and_merges_with_later_history() {
     history.set_mode(HistoryMode::Status);
     assert_eq!(
         history.receive_live(
-            generation,
+            history.generation(),
             source,
             event,
             summary.metadata.clone(),
@@ -142,7 +142,7 @@ fn live_commit_is_verified_idempotent_bounded_and_merges_with_later_history() {
     history.set_limit(0);
     assert_eq!(
         history.receive_live(
-            generation,
+            history.generation(),
             source,
             event,
             summary.metadata.clone(),
@@ -287,14 +287,14 @@ fn history_modes_and_limit_bound_queries_and_cached_bodies() {
     assert!(!history.wants_body());
     assert!(history.body_for_explicit_copy(event).is_none());
     assert_eq!(
-        history.cache_body(generation, event, b"fixture".to_vec()),
+        history.cache_body(history.generation(), event, b"fixture".to_vec()),
         Err(HistoryError::Disabled)
     );
     history.set_mode(HistoryMode::Off);
     assert!(!history.query_enabled());
     assert!(history.timeline().is_empty());
     assert_eq!(
-        history.merge_page(generation, source, page.clone(), 2),
+        history.merge_page(history.generation(), source, page.clone(), 2),
         Err(HistoryError::Disabled)
     );
     history.set_mode(HistoryMode::Content);
@@ -303,7 +303,9 @@ fn history_modes_and_limit_bound_queries_and_cached_bodies() {
     assert!(history.set_limit(0));
     assert!(!history.query_enabled());
     assert!(history.set_limit(1));
-    history.merge_page(generation, source, page, 3).unwrap();
+    history
+        .merge_page(history.generation(), source, page, 3)
+        .unwrap();
     assert_eq!(history.timeline().len(), 1);
 }
 

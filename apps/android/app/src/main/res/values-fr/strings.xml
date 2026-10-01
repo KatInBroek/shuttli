@@ -91,7 +91,7 @@
     <string name="connection">Connexion</string>
     <string name="receiving">Réception</string>
     <string name="sending">Envoi</string>
-    <string name="receive_help">Récupérez l’historique récent pendant que l’application est ouverte. Le contenu reste dans l’application jusqu’à Copier.</string>
+    <string name="receive_help">Quand cette app est ouverte, recevez les nouvelles copies et récupérez l’historique récent. Les copies restent dans l’app jusqu’à ce que vous touchiez Copier.</string>
     <string name="send_help">L’envoi est toujours manuel. Collez, puis envoyez.</string>
     <string name="device_fingerprint">Empreinte de l’appareil</string>
     <string name="confirm_device">Confirmer cet appareil</string>
@@ -105,4 +105,8 @@
     <string name="language">Langue</string>
     <string name="system_language">Langue du système</string>
     <string name="send_partial">Certains appareils n’ont pas confirmé ; vérifiez leur état</string>
+    <string name="history_unsupported">Mettez à jour le client de cet appareil pour récupérer son historique</string>
+    <string name="device_can_receive">%1$d appareil peut recevoir</string>
+    <string name="history_empty_filtered">Aucune copie correspondante</string>
+    <string name="history_empty_filtered_help">Aucune copie récente ne correspond à ce filtre.</string>
 </resources>

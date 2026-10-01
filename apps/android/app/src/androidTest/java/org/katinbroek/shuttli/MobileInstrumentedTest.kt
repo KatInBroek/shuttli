@@ -54,6 +54,11 @@ class MobileInstrumentedTest {
         rule.onNodeWithText(activity.getString(R.string.this_phone)).assertExists()
         rule.onNodeWithText(activity.getString(R.string.home)).performClick()
         rule.onNodeWithText(activity.getString(R.string.paste_clipboard)).assertExists()
+        rule.onNodeWithText(activity.getString(R.string.images)).performClick()
+        rule.onNodeWithText(activity.getString(R.string.history_empty_filtered)).assertExists()
+        rule.onNodeWithText(activity.getString(R.string.history_empty)).assertDoesNotExist()
+        rule.onNodeWithText(activity.getString(R.string.all)).performClick()
+        rule.onNodeWithText(activity.getString(R.string.history_empty)).assertExists()
     }
 
     @Test fun draftIsFrozenUntilCancelledAndOfflineSendIsDisabled() {

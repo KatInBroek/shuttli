@@ -9,9 +9,10 @@ use shuttli_model::{
     mobile::Capabilities,
     sync::{DeviceId, EventId, Format, Metadata},
 };
-use shuttli_protocol::{FrameV2, Hello, decode_hello, encode_hello};
+use shuttli_protocol::{FrameV2, Hello};
 use shuttli_transport::{
-    FrameReader, WireVersion, read_frame, read_live_frame, write_frame, write_live_frame,
+    FrameReader, WireVersion, read_frame, read_hello, read_live_frame, write_frame, write_hello,
+    write_live_frame,
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -20,7 +21,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    io::{AsyncRead, AsyncWrite},
     net::{TcpListener, TcpStream},
     sync::{Semaphore, mpsc, watch},
     time::timeout,
@@ -54,13 +55,29 @@ pub enum SendState {
 
 #[derive(Clone)]
 pub struct SendCommand {
-    pub event: EventId,
-    pub target: DeviceId,
-    pub metadata: Metadata,
+    pub permit: Arc<shuttli_core::sync::Publication>,
     pub body: Arc<[u8]>,
 }
 
+impl SendCommand {
+    pub fn event(&self) -> EventId {
+        self.permit.event()
+    }
+    pub fn target(&self) -> DeviceId {
+        self.permit.target()
+    }
+    pub fn metadata(&self) -> &Metadata {
+        self.permit.metadata()
+    }
+}
+
 pub type SendResults = Arc<Mutex<BTreeMap<(EventId, DeviceId), SendState>>>;
+
+#[derive(Clone)]
+struct Route {
+    initiator: DeviceId,
+    commands: mpsc::Sender<SendCommand>,
+}
 
 impl MobileTransport {
     pub fn start(
@@ -80,8 +97,10 @@ impl MobileTransport {
         }
         let listener = std::net::TcpListener::bind((bind_ip, PORT)).map_err(|e| e.to_string())?;
         listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-        let mut epoch = [0; 16];
-        getrandom::getrandom(&mut epoch).map_err(|e| e.to_string())?;
+        let epoch = peers
+            .lock()
+            .map_err(|_| "peer directory unavailable")?
+            .epoch();
         let (stop, receiver) = watch::channel(false);
         let (commands, command_rx) = mpsc::channel(16);
         let (refresh, refresh_rx) = watch::channel(0);
@@ -161,10 +180,10 @@ async fn run_listener(
             _ = stop.changed() => { if *stop.borrow() { break; } }
             command = commands.recv() => {
                 let Some(command) = command else { break; };
-                let route = context.routes.lock().await.get(&command.target).cloned();
-                if route.is_none_or(|route| route.try_send(command.clone()).is_err()) {
+                let route = context.routes.lock().await.get(&command.target()).cloned();
+                if route.is_none_or(|route| route.commands.try_send(command.clone()).is_err()) {
                     if let Ok(mut results) = context.results.lock() {
-                        results.insert((command.event, command.target), SendState::Failed);
+                        results.insert((command.event(), command.target()), SendState::Failed);
                     }
                 }
             }
@@ -192,7 +211,7 @@ async fn run_listener(
                 let context = context.clone();
                 tokio::spawn(async move {
                     let _slot = slot;
-                    let _ = accept_desktop(stream, address, context).await;
+                    let _ = accept_peer(stream, address, context).await;
                 });
             }
         }
@@ -207,12 +226,12 @@ struct SessionContext {
     history: Arc<Mutex<MobileHistory>>,
     peers: Arc<Mutex<PeerDirectory>>,
     results: SendResults,
-    routes: Arc<tokio::sync::Mutex<BTreeMap<DeviceId, mpsc::Sender<SendCommand>>>>,
+    routes: Arc<tokio::sync::Mutex<BTreeMap<DeviceId, Route>>>,
     stop: watch::Receiver<bool>,
     refresh: watch::Receiver<u64>,
 }
 
-async fn accept_desktop(
+async fn accept_peer(
     stream: TcpStream,
     address: SocketAddr,
     context: SessionContext,
@@ -229,7 +248,7 @@ async fn accept_desktop(
             .1
             .peer_certificates()
             .and_then(|certs| certs.first())
-            .ok_or("missing desktop identity")?
+            .ok_or("missing peer identity")?
             .as_ref(),
     )?;
     let remote = timeout(Duration::from_secs(5), read_hello(&mut tls))
@@ -268,7 +287,9 @@ async fn accept_desktop(
         }
     };
     write_hello(&mut tls, &hello).await?;
-    let selected = read_frame(&mut tls).await?;
+    let selected = timeout(Duration::from_secs(5), read_frame(&mut tls))
+        .await
+        .map_err(|_| "session selection timeout")??;
     if !matches!(selected, FrameV2::Select { initiator } if initiator == remote_id) {
         return Err("session selection mismatch".into());
     }
@@ -301,11 +322,7 @@ async fn accept_desktop(
         .map_err(|_| "history unavailable")?
         .generation();
     let (sender, commands) = mpsc::channel(8);
-    context
-        .routes
-        .lock()
-        .await
-        .insert(remote_id, sender.clone());
+    register_route(&context, remote_id, remote_id, sender.clone()).await?;
     let result = if version == WireVersion::V1 {
         live_v1_session(
             &mut tls,
@@ -402,7 +419,7 @@ async fn connect_candidate(candidate: Candidate, context: SessionContext) -> Res
         },
     )
     .await?;
-    if !matches!(read_frame(&mut tls).await?, FrameV2::Select { initiator } if initiator == context.identity.id)
+    if !matches!(timeout(Duration::from_secs(5), read_frame(&mut tls)).await.map_err(|_| "session selection timeout")??, FrameV2::Select { initiator } if initiator == context.identity.id)
     {
         return Err("session selection mismatch".into());
     }
@@ -418,11 +435,7 @@ async fn connect_candidate(candidate: Candidate, context: SessionContext) -> Res
         .map_err(|_| "history unavailable")?
         .generation();
     let (sender, commands) = mpsc::channel(8);
-    context
-        .routes
-        .lock()
-        .await
-        .insert(remote_id, sender.clone());
+    register_route(&context, remote_id, context.identity.id, sender.clone()).await?;
     let result = if version == WireVersion::V1 {
         live_v1_session(
             &mut tls,
@@ -449,6 +462,29 @@ async fn connect_candidate(candidate: Candidate, context: SessionContext) -> Res
     result
 }
 
+async fn register_route(
+    context: &SessionContext,
+    peer: DeviceId,
+    initiator: DeviceId,
+    commands: mpsc::Sender<SendCommand>,
+) -> Result<()> {
+    let mut routes = context.routes.lock().await;
+    if routes
+        .get(&peer)
+        .is_some_and(|old| old.initiator <= initiator)
+    {
+        return Err("preferred session already active".into());
+    }
+    routes.insert(
+        peer,
+        Route {
+            initiator,
+            commands,
+        },
+    );
+    Ok(())
+}
+
 /// Only the currently registered session may invalidate this source's state.
 async fn finish_session(
     context: &SessionContext,
@@ -459,7 +495,7 @@ async fn finish_session(
     let mut routes = context.routes.lock().await;
     if routes
         .get(&source)
-        .is_none_or(|current| !current.same_channel(sender))
+        .is_none_or(|current| !current.commands.same_channel(sender))
     {
         return;
     }
@@ -487,7 +523,7 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
     stream: &mut S,
     source: DeviceId,
     source_epoch: [u8; 16],
-    generation: u64,
+    mut generation: u64,
     context: &SessionContext,
     mut commands: mpsc::Receiver<SendCommand>,
 ) -> Result<()> {
@@ -508,6 +544,7 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
     let mut requested = context.refresh.clone();
     let mut refresh_notifications = true;
     let mut pending_list = false;
+    let mut pending_revision = 0;
     let mut pending_body: Option<EventId> = None;
     let mut body_queue = VecDeque::new();
     let mut next_cursor = None;
@@ -518,7 +555,65 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
     let mut request_started = Instant::now();
     let mut frame_reader = FrameReader::default();
     let mut deferred_command: Option<SendCommand> = None;
+    let mut last_roster = None;
+    let mut roster_revision = 0u64;
+    let mut renew_roster = Instant::now();
+    let mut last_history_revision = None;
+    let mut next_notice = Instant::now();
     loop {
+        if !pending_list && pending_body.is_none() {
+            let current = history
+                .lock()
+                .map_err(|_| "history unavailable")?
+                .generation();
+            if current != generation {
+                generation = current;
+                body_queue.clear();
+                next_cursor = None;
+                refresh_needed = true;
+            }
+        }
+        if frame_reader.is_idle()
+            && !pending_list
+            && pending_body.is_none()
+            && !pending_poll
+            && Instant::now() >= next_notice
+        {
+            next_notice = Instant::now() + Duration::from_secs(5);
+            let notices = export_notices(context, source, generation);
+            if let Some((roster, revision, capabilities)) = notices {
+                if capabilities.peer_hints
+                    && (last_roster.as_ref() != Some(&roster) || Instant::now() >= renew_roster)
+                {
+                    roster_revision = roster_revision.saturating_add(1);
+                    write_frame(
+                        stream,
+                        &FrameV2::PeerList {
+                            revision: roster_revision,
+                            peers: roster.clone(),
+                        },
+                    )
+                    .await?;
+                    last_roster = Some(roster);
+                    renew_roster = Instant::now() + Duration::from_secs(30);
+                }
+                if let Some(visible_revision) = revision
+                    .filter(|_| capabilities.history_change && revision != last_history_revision)
+                {
+                    write_frame(
+                        stream,
+                        &FrameV2::HistoryChanged {
+                            revision: visible_revision,
+                        },
+                    )
+                    .await?;
+                    last_history_revision = revision;
+                }
+            } else {
+                last_roster = None;
+                last_history_revision = None;
+            }
+        }
         if granted
             && !pending_poll
             && !pending_list
@@ -526,7 +621,7 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
             && frame_reader.is_idle()
         {
             if let Some(command) = deferred_command.take() {
-                let outcome = if command.target != source {
+                let outcome = if command.target() != source {
                     SendState::Failed
                 } else {
                     match timeout(
@@ -540,7 +635,7 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                     }
                 };
                 if let Ok(mut results) = context.results.lock() {
-                    results.insert((command.event, command.target), outcome);
+                    results.insert((command.event(), command.target()), outcome);
                 }
                 granted = leader;
                 refresh_needed = true;
@@ -575,6 +670,10 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                 poll_needed = false;
                 request_started = Instant::now();
             } else if let Some(event) = body_queue.pop_front() {
+                pending_revision = peers
+                    .lock()
+                    .map_err(|_| "peer directory unavailable")?
+                    .policy_revision();
                 write_frame(stream, &FrameV2::HistoryGet { event }).await?;
                 pending_body = Some(event);
                 request_started = Instant::now();
@@ -584,6 +683,10 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                     .map_err(|_| "history unavailable")?
                     .source_activity(generation, source, HistoryActivity::Receiving, Some(event));
             } else if let Some(cursor) = next_cursor.take() {
+                pending_revision = peers
+                    .lock()
+                    .map_err(|_| "peer directory unavailable")?
+                    .policy_revision();
                 write_frame(
                     stream,
                     &FrameV2::HistoryListRequest {
@@ -598,6 +701,10 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
             } else if refresh_needed && can_query(context, source) {
                 refresh_needed = false;
                 body_budget = crate::MAX_SESSION_BYTES;
+                pending_revision = peers
+                    .lock()
+                    .map_err(|_| "peer directory unavailable")?
+                    .policy_revision();
                 history
                     .lock()
                     .map_err(|_| "history unavailable")?
@@ -630,7 +737,7 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
             }
             _ = stop.changed() => { if *stop.borrow() { return Ok(()); } }
             command = commands.recv(), if deferred_command.is_none() => {
-                deferred_command = command;
+                deferred_command = Some(command.ok_or("session superseded")?);
             }
             _ = refresh.tick() => {
                 refresh_needed = true;
@@ -645,11 +752,27 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                             .accept_hints(source, shuttli_model::mobile::PeerList { revision, peers: hints }, now_ms())
                             .map_err(|e| format!("{e:?}"))?;
                     }
+                    FrameV2::HistoryListRequest { cursor, limit } if !pending_list && pending_body.is_none() => {
+                        serve_history_list(stream, source, generation, cursor, limit, context).await?;
+                        if leader && pending_poll {
+                            pending_poll = false;
+                            poll_needed = live_protocol;
+                        }
+                    }
+                    FrameV2::HistoryGet { event } if !pending_list && pending_body.is_none() => {
+                        timeout(Duration::from_secs(20), serve_history_body(stream, source, generation, event, context))
+                            .await.map_err(|_| "history export timeout")??;
+                        if leader && pending_poll {
+                            pending_poll = false;
+                            poll_needed = live_protocol;
+                        }
+                    }
                     FrameV2::HistoryListResponse { source_epoch: page_epoch, revision, items, next } if pending_list => {
                         if page_epoch != source_epoch { return Err("history source epoch mismatch".into()); }
                         pending_list = false;
                         poll_needed = live_protocol;
-                        if !can_query(context, source) {
+                        if !can_query(context, source) || history.lock().map_err(|_| "history unavailable")?.generation() != generation || peers.lock().map_err(|_| "peer directory unavailable")?.policy_revision() != pending_revision {
+                            refresh_needed = true;
                             body_queue.clear();
                             next_cursor = None;
                             continue;
@@ -679,11 +802,9 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                         }
                     }
                     FrameV2::HistoryBody { event, metadata } if pending_body == Some(event) => {
-                        if metadata.size > 8 * 1024 * 1024 { return Err("oversized history body".into()); }
-                        let mut bytes = vec![0; metadata.size as usize];
-                        timeout(Duration::from_secs(20), stream.read_exact(&mut bytes))
-                            .await.map_err(|_| "history body timeout")?.map_err(|e| e.to_string())?;
-                        if can_query(context, source) && content_allowed(context, source, metadata.format) && history.lock().map_err(|_| "history unavailable")?.wants_body() {
+                        let bytes = timeout(Duration::from_secs(20), shuttli_transport::receive_body(stream, &metadata, || true))
+                            .await.map_err(|_| "history body timeout")??;
+                        if can_query(context, source) && content_allowed(context, source, metadata.format) && history.lock().map_err(|_| "history unavailable")?.wants_body() && history.lock().map_err(|_| "history unavailable")?.generation() == generation && peers.lock().map_err(|_| "peer directory unavailable")?.policy_revision() == pending_revision {
                             if history.lock().map_err(|_| "history unavailable")?.timeline()
                                 .iter().find(|row| row.summary.event == event)
                                 .is_none_or(|row| row.summary.metadata != metadata) {
@@ -692,6 +813,7 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                             history.lock().map_err(|_| "history unavailable")?
                                 .cache_body(generation, event, bytes).map_err(|e| format!("{e:?}"))?;
                         } else {
+                            refresh_needed = true;
                             body_queue.clear();
                             next_cursor = None;
                         }
@@ -745,7 +867,7 @@ async fn live_v1_session<S: AsyncRead + AsyncWrite + Unpin>(
     stream: &mut S,
     source: DeviceId,
     source_epoch: [u8; 16],
-    generation: u64,
+    _generation: u64,
     context: &SessionContext,
     mut commands: mpsc::Receiver<SendCommand>,
     initiator: bool,
@@ -753,6 +875,9 @@ async fn live_v1_session<S: AsyncRead + AsyncWrite + Unpin>(
     let version = WireVersion::V1;
     let mut stop = context.stop.clone();
     loop {
+        if commands.is_closed() && commands.is_empty() {
+            return Err("session superseded".into());
+        }
         if initiator {
             if let Ok(command) = commands.try_recv() {
                 execute_v1_send(stream, &command, context).await?;
@@ -773,6 +898,11 @@ async fn live_v1_session<S: AsyncRead + AsyncWrite + Unpin>(
             }
             FrameV2::Idle if initiator => {}
             FrameV2::Offer { event, meta } => {
+                let generation = context
+                    .history
+                    .lock()
+                    .map_err(|_| "history unavailable")?
+                    .generation();
                 timeout(
                     Duration::from_secs(20),
                     receive_offer_version(
@@ -847,7 +977,7 @@ async fn execute_v1_send<S: AsyncRead + AsyncWrite + Unpin>(
     .and_then(std::result::Result::ok)
     .unwrap_or(SendState::Unknown);
     if let Ok(mut results) = context.results.lock() {
-        results.insert((command.event, command.target), outcome);
+        results.insert((command.event(), command.target()), outcome);
     }
     if outcome == SendState::Unknown {
         Err("outgoing result unknown".into())
@@ -856,7 +986,7 @@ async fn execute_v1_send<S: AsyncRead + AsyncWrite + Unpin>(
     }
 }
 
-fn can_query(context: &SessionContext, source: DeviceId) -> bool {
+fn can_receive(context: &SessionContext, source: DeviceId) -> bool {
     let permitted = context.peers.lock().ok().is_some_and(|directory| {
         directory
             .direct()
@@ -871,6 +1001,157 @@ fn can_query(context: &SessionContext, source: DeviceId) -> bool {
             .is_some_and(|history| history.query_enabled())
 }
 
+fn export_permitted(
+    context: &SessionContext,
+    source: DeviceId,
+    generation: u64,
+    revision: u64,
+) -> bool {
+    !*context.stop.borrow()
+        && context
+            .peers
+            .lock()
+            .ok()
+            .is_some_and(|p| p.policy_revision() == revision && p.authorize_hints(source))
+        && context
+            .history
+            .lock()
+            .ok()
+            .is_some_and(|h| h.generation() == generation && h.query_enabled())
+}
+
+fn export_notices(
+    context: &SessionContext,
+    source: DeviceId,
+    generation: u64,
+) -> Option<(
+    Vec<shuttli_model::mobile::PeerHint>,
+    Option<u64>,
+    Capabilities,
+)> {
+    let directory = context.peers.lock().ok()?;
+    if !directory.authorize_hints(source) {
+        return None;
+    }
+    let direct = directory.direct();
+    let peer = direct.iter().find(|p| p.id == source)?;
+    let history = context.history.lock().ok()?;
+    if !history.is_active() || history.generation() != generation {
+        return None;
+    }
+    let revision = history
+        .export_page(
+            generation,
+            context.identity.id,
+            context.epoch,
+            None,
+            1,
+            |event, meta, body| directory.authorize_history(source, event, meta, body),
+        )
+        .ok()
+        .map(|p| p.revision);
+    let roster = direct
+        .iter()
+        .filter(|p| p.id != source && p.online)
+        .map(|p| shuttli_model::mobile::PeerHint {
+            id: p.id,
+            endpoint: p.endpoint.clone(),
+            capabilities: p.capabilities,
+        })
+        .collect();
+    Some((roster, revision, peer.capabilities))
+}
+
+async fn serve_history_list<S: AsyncWrite + Unpin>(
+    stream: &mut S,
+    source: DeviceId,
+    generation: u64,
+    cursor: Option<shuttli_model::mobile::HistoryCursor>,
+    limit: u16,
+    context: &SessionContext,
+) -> Result<()> {
+    let result = (|| {
+        let directory = context.peers.lock().map_err(|_| "history_unavailable")?;
+        if !directory.authorize_hints(source) {
+            return Err("history_denied".into());
+        }
+        let page = context
+            .history
+            .lock()
+            .map_err(|_| "history_unavailable")?
+            .export_page(
+                generation,
+                context.identity.id,
+                context.epoch,
+                cursor,
+                limit,
+                |event, meta, body| directory.authorize_history(source, event, meta, body),
+            )
+            .map_err(str::to_owned)?;
+        Ok((
+            directory.policy_revision(),
+            shuttli_transport::history::Export::List(page),
+        ))
+    })();
+    shuttli_transport::history::respond(stream, result, |revision| {
+        export_permitted(context, source, generation, revision)
+    })
+    .await
+}
+
+async fn serve_history_body<S: AsyncWrite + Unpin>(
+    stream: &mut S,
+    source: DeviceId,
+    generation: u64,
+    event: EventId,
+    context: &SessionContext,
+) -> Result<()> {
+    let result = (|| {
+        let directory = context.peers.lock().map_err(|_| "history_unavailable")?;
+        if !directory.authorize_hints(source) {
+            return Err("history_denied".into());
+        }
+        let history = context.history.lock().map_err(|_| "history_unavailable")?;
+        if history.generation() != generation || !history.wants_body() {
+            return Err("history_denied".into());
+        }
+        let metadata = history
+            .timeline()
+            .into_iter()
+            .find(|r| r.summary.event == event)
+            .ok_or("history_unavailable")?
+            .summary
+            .metadata;
+        if !directory.authorize_history(source, event, &metadata, true) {
+            return Err("history_denied".into());
+        }
+        let bytes = history
+            .body_for_explicit_copy(event)
+            .ok_or("history_unavailable")?;
+        Ok((
+            directory.policy_revision(),
+            shuttli_transport::history::Export::Body {
+                event,
+                metadata,
+                bytes,
+            },
+        ))
+    })();
+    shuttli_transport::history::respond(stream, result, |revision| {
+        export_permitted(context, source, generation, revision)
+    })
+    .await
+}
+
+fn can_query(context: &SessionContext, source: DeviceId) -> bool {
+    can_receive(context, source)
+        && context.peers.lock().ok().is_some_and(|p| {
+            p.direct()
+                .iter()
+                .any(|peer| peer.id == source && peer.capabilities.history_pull)
+        })
+}
+
 fn content_allowed(context: &SessionContext, source: DeviceId, format: Format) -> bool {
     context.peers.lock().ok().is_some_and(|directory| {
         directory
@@ -880,21 +1161,14 @@ fn content_allowed(context: &SessionContext, source: DeviceId, format: Format) -
     })
 }
 
-fn permitted_to_send(context: &SessionContext, target: DeviceId, format: Format) -> bool {
+fn permitted_to_send(context: &SessionContext, command: &SendCommand) -> bool {
     !*context.stop.borrow()
+        && context.history.lock().ok().is_some_and(|h| h.is_active())
         && context
-            .history
+            .peers
             .lock()
             .ok()
-            .is_some_and(|history| history.is_active())
-        && context.peers.lock().ok().is_some_and(|directory| {
-            directory.direct().iter().any(|peer| {
-                peer.id == target
-                    && peer.online
-                    && peer.directions.send
-                    && peer.directions.allows(format)
-            })
-        })
+            .is_some_and(|p| p.may_send(&command.permit))
 }
 
 async fn send_offer<S: AsyncRead + AsyncWrite + Unpin>(
@@ -910,20 +1184,20 @@ async fn send_offer_version<S: AsyncRead + AsyncWrite + Unpin>(
     context: &SessionContext,
     version: WireVersion,
 ) -> Result<SendState> {
-    if command.event.origin != context.identity.id
-        || command.event.epoch != context.epoch
-        || command.event.seq == 0
+    if command.event().origin != context.identity.id
+        || command.event().epoch != context.epoch
+        || command.event().seq == 0
     {
         return Ok(SendState::Failed);
     }
     let result = shuttli_transport::send_live_version(
         stream,
         shuttli_transport::LiveOffer {
-            event: command.event,
-            metadata: &command.metadata,
+            event: command.event(),
+            metadata: command.metadata(),
             body: &command.body,
         },
-        || permitted_to_send(context, command.target, command.metadata.format),
+        || permitted_to_send(context, command),
         |frame| {
             match frame {
                 FrameV2::PeerList { revision, peers } => {
@@ -932,7 +1206,7 @@ async fn send_offer_version<S: AsyncRead + AsyncWrite + Unpin>(
                         .lock()
                         .map_err(|_| "peer directory unavailable")?
                         .accept_hints(
-                            command.target,
+                            command.target(),
                             shuttli_model::mobile::PeerList { revision, peers },
                             now_ms(),
                         )
@@ -945,7 +1219,7 @@ async fn send_offer_version<S: AsyncRead + AsyncWrite + Unpin>(
         },
         || {
             if let Ok(mut results) = context.results.lock() {
-                results.insert((command.event, command.target), SendState::Sending);
+                results.insert((command.event(), command.target()), SendState::Sending);
             }
         },
         version,
@@ -998,8 +1272,20 @@ async fn receive_offer_version<S: AsyncRead + AsyncWrite + Unpin>(
         epoch: source_epoch,
         generation,
     } = received_from;
+    let ticket = context
+        .peers
+        .lock()
+        .map_err(|_| "peer directory unavailable")?
+        .receive_ticket(source, event, meta.clone(), generation)
+        .ok();
     let allowed = || {
-        can_query(context, source)
+        ticket.as_ref().is_some_and(|t| {
+            context
+                .peers
+                .lock()
+                .ok()
+                .is_some_and(|p| p.may_receive(t, generation))
+        }) && can_receive(context, source)
             && content_allowed(context, source, meta.format)
             && context
                 .history
@@ -1075,29 +1361,6 @@ fn now_ms() -> u64 {
         .as_millis()
         .try_into()
         .unwrap_or(u64::MAX)
-}
-
-async fn write_hello(stream: &mut (impl AsyncWrite + Unpin), hello: &Hello) -> Result<()> {
-    let bytes = encode_hello(hello).map_err(str::to_owned)?;
-    stream
-        .write_u32(bytes.len() as u32)
-        .await
-        .map_err(|e| e.to_string())?;
-    stream.write_all(&bytes).await.map_err(|e| e.to_string())?;
-    stream.flush().await.map_err(|e| e.to_string())
-}
-
-async fn read_hello(stream: &mut (impl AsyncRead + Unpin)) -> Result<Hello> {
-    let len = stream.read_u32().await.map_err(|e| e.to_string())? as usize;
-    if len == 0 || len > shuttli_protocol::MAX_CONTROL_FRAME_BYTES {
-        return Err("invalid hello size".into());
-    }
-    let mut bytes = vec![0; len];
-    stream
-        .read_exact(&mut bytes)
-        .await
-        .map_err(|e| e.to_string())?;
-    decode_hello(&bytes).map_err(str::to_owned)
 }
 
 #[cfg(test)]

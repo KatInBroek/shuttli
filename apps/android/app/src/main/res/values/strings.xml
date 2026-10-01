@@ -91,7 +91,7 @@
     <string name="connection">Connection</string>
     <string name="receiving">Receiving</string>
     <string name="sending">Sending</string>
-    <string name="receive_help">Retrieve recent history while this app is open. Copies stay in the app until you tap Copy.</string>
+    <string name="receive_help">While this app is open, receive new copies and retrieve recent history. Copies stay in the app until you tap Copy.</string>
     <string name="send_help">Sending is always manual. Paste first, then Send.</string>
     <string name="device_fingerprint">Device fingerprint</string>
     <string name="confirm_device">Confirm this device</string>
@@ -105,4 +105,8 @@
     <string name="language">Language</string>
     <string name="system_language">System default</string>
     <string name="send_partial">Some devices did not confirm; check their status</string>
+    <string name="history_unsupported">History queries require a newer client on this device</string>
+    <string name="device_can_receive">%1$d device can receive</string>
+    <string name="history_empty_filtered">No matching copies</string>
+    <string name="history_empty_filtered_help">No recent copies match this filter.</string>
 </resources>

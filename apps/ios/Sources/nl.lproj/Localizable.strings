@@ -90,7 +90,7 @@
 "connection" = "Verbinding";
 "receiving" = "Ontvangen";
 "sending" = "Verzenden";
-"receive_help" = "Haal recente geschiedenis op terwijl de app open is. Kopieën blijven in de app totdat je op Kopiëren tikt.";
+"receive_help" = "Ontvang nieuwe kopieën en haal recente geschiedenis op terwijl deze app open is. Kopieën blijven in de app totdat je op Kopiëren tikt.";
 "send_help" = "Verzenden is altijd handmatig. Eerst Plakken, dan Verzenden.";
 "device_fingerprint" = "Apparaatvingerafdruk";
 "confirm_device" = "Dit apparaat bevestigen";
@@ -105,3 +105,8 @@
 "system_language" = "Systeemstandaard";
 "unsupported_text" = "Tekst te groot of niet ondersteund";
 "send_partial" = "Sommige apparaten hebben niet bevestigd; controleer hun status";
+
+"history_unsupported" = "Werk de client op dit apparaat bij om geschiedenis op te halen";
+"device_can_receive" = "%d apparaat kan ontvangen";
+"history_empty_filtered" = "Geen overeenkomende kopieën";
+"history_empty_filtered_help" = "Geen recente kopieën komen overeen met dit filter.";

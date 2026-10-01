@@ -90,7 +90,7 @@
 "connection" = "Connection";
 "receiving" = "Receiving";
 "sending" = "Sending";
-"receive_help" = "Retrieve recent history while this app is open. Copies stay in the app until you tap Copy.";
+"receive_help" = "While this app is open, receive new copies and retrieve recent history. Copies stay in the app until you tap Copy.";
 "send_help" = "Sending is always manual. Paste first, then Send.";
 "device_fingerprint" = "Device fingerprint";
 "confirm_device" = "Confirm this device";
@@ -105,3 +105,8 @@
 "system_language" = "System default";
 "unsupported_text" = "Text is too large or unsupported";
 "send_partial" = "Some devices did not confirm; check their status";
+
+"history_unsupported" = "History queries require a newer client on this device";
+"device_can_receive" = "%d device can receive";
+"history_empty_filtered" = "No matching copies";
+"history_empty_filtered_help" = "No recent copies match this filter.";

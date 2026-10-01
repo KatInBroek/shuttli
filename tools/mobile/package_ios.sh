@@ -57,7 +57,7 @@ with zipfile.ZipFile(ipa) as archive:
 
 manifest = {
     "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip(),
-    "sdk_api": 6,
+    "sdk_api": 7,
     "wire_version": 3,
     "platform": "iPhoneOS",
     "architectures": architectures,

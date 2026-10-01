@@ -1,5 +1,7 @@
 //! Peer hints never confer identity or permission. The transport must bind
 //! direct observations and roster sources to mutually authenticated TLS peers.
+use shuttli_core::sync::{Publication, Reception, Rejection, SyncCore};
+use shuttli_model::sync::{ClipboardStamp, EventId, Metadata, PeerPolicy, Settings};
 use shuttli_model::{
     mobile::{Capabilities, PeerHint, PeerList},
     sync::{DeviceId, Format},
@@ -74,16 +76,106 @@ pub struct PeerDirectory {
     direct: BTreeMap<DeviceId, DirectPeer>,
     hints: BTreeMap<DeviceId, SourceHints>,
     saved_directions: BTreeMap<DeviceId, Directions>,
+    epoch: [u8; 16],
+    core: SyncCore,
 }
 
 impl PeerDirectory {
     pub fn new(own: DeviceId) -> Self {
+        let mut epoch = [0; 16];
+        getrandom::getrandom(&mut epoch).expect("session entropy");
         Self {
             own,
             direct: BTreeMap::new(),
             hints: BTreeMap::new(),
             saved_directions: BTreeMap::new(),
+            epoch,
+            core: SyncCore::new(
+                own,
+                epoch,
+                Settings {
+                    automatic: false,
+                    ..Settings::default()
+                },
+            ),
         }
+    }
+    pub fn epoch(&self) -> [u8; 16] {
+        self.epoch
+    }
+    pub fn policy_revision(&self) -> u64 {
+        self.core.revision()
+    }
+
+    fn configure_core(&mut self) {
+        let settings = Settings {
+            automatic: false,
+            peers: self
+                .direct
+                .values()
+                .map(|p| {
+                    (
+                        hex::encode(p.id),
+                        PeerPolicy {
+                            send: p.online && p.directions.send,
+                            receive: p.online && p.directions.receive,
+                            text: p.directions.text,
+                            png: p.directions.image,
+                            ..PeerPolicy::default()
+                        },
+                    )
+                })
+                .collect(),
+            ..Settings::default()
+        };
+        if self.core.settings() != &settings {
+            self.core
+                .configure(settings)
+                .expect("bounded peer settings");
+        }
+    }
+
+    pub fn manual(&mut self, metadata: &Metadata) -> Result<Vec<Publication>, Rejection> {
+        self.core.manual(
+            ClipboardStamp {
+                generation: 0,
+                digest: metadata.digest,
+                sensitive: false,
+            },
+            metadata,
+        )
+    }
+    pub fn may_send(&self, permit: &Publication) -> bool {
+        self.core.may_send(permit)
+    }
+    pub fn authorize_hints(&self, target: DeviceId) -> bool {
+        self.core.authorize_peer_hints(target).is_ok()
+    }
+    pub fn authorize_history(
+        &self,
+        target: DeviceId,
+        event: EventId,
+        meta: &Metadata,
+        body: bool,
+    ) -> bool {
+        event.epoch == self.epoch
+            && self
+                .core
+                .authorize_history_export(target, event, meta, body)
+                .is_ok()
+    }
+    pub fn receive_ticket(
+        &mut self,
+        source: DeviceId,
+        event: EventId,
+        metadata: Metadata,
+        generation: u64,
+    ) -> Result<Reception, Rejection> {
+        self.core.baseline(Some(cache_stamp(generation)));
+        self.core.receive(source, event, metadata)
+    }
+    pub fn may_receive(&self, permit: &Reception, generation: u64) -> bool {
+        self.core.may_apply(permit, cache_stamp(generation)).is_ok()
     }
     pub fn own_id(&self) -> DeviceId {
         self.own
@@ -123,6 +215,10 @@ impl PeerDirectory {
                 directions,
             },
         );
+        self.core
+            .register(id, hex::encode(id))
+            .map_err(|_| DirectoryError::Capacity)?;
+        self.configure_core();
         Ok(())
     }
 
@@ -131,6 +227,7 @@ impl PeerDirectory {
             peer.online = false;
         }
         self.hints.remove(&id);
+        self.configure_core();
     }
 
     pub fn directions(
@@ -144,6 +241,7 @@ impl PeerDirectory {
             .ok_or(DirectoryError::UnknownSource)?;
         peer.directions = directions;
         self.saved_directions.insert(id, directions);
+        self.configure_core();
         Ok(())
     }
 
@@ -160,6 +258,7 @@ impl PeerDirectory {
         if let Some(peer) = self.direct.get_mut(&id) {
             peer.directions = directions;
         }
+        self.configure_core();
         true
     }
 
@@ -205,19 +304,49 @@ impl PeerDirectory {
     /// Suggestions for a direct TLS probe; consumers must verify the expected
     /// public-key identity before adding the device to `direct`.
     pub fn candidates(&self) -> Vec<Candidate> {
-        self.hints
+        let mut candidates: BTreeMap<DeviceId, Candidate> = self
+            .hints
             .iter()
             .flat_map(|(source, roster)| {
                 roster
                     .hints
                     .iter()
                     .filter(|hint| !self.direct.get(&hint.id).is_some_and(|p| p.online))
-                    .map(|hint| Candidate {
-                        hint: hint.clone(),
-                        source: *source,
+                    .map(|hint| {
+                        (
+                            hint.id,
+                            Candidate {
+                                hint: hint.clone(),
+                                source: *source,
+                            },
+                        )
                     })
             })
-            .collect()
+            .collect();
+        // Direct authentication survives hint expiry. Retry known endpoints
+        // after backgrounding or a broken connection, without granting consent.
+        for peer in self.direct.values().filter(|p| !p.online) {
+            candidates.insert(
+                peer.id,
+                Candidate {
+                    hint: PeerHint {
+                        id: peer.id,
+                        endpoint: peer.endpoint.clone(),
+                        capabilities: peer.capabilities,
+                    },
+                    source: peer.id,
+                },
+            );
+        }
+        candidates.into_values().collect()
+    }
+}
+
+fn cache_stamp(generation: u64) -> ClipboardStamp {
+    ClipboardStamp {
+        generation,
+        digest: [0; 32],
+        sensitive: false,
     }
 }
 

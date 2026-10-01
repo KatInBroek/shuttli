@@ -287,3 +287,60 @@ async fn initial_denial_invalid_metadata_and_wrong_ready_do_not_send_bodies() {
         assert!(tx.await.unwrap().is_err());
     }
 }
+
+#[tokio::test]
+async fn shared_history_response_validates_content_and_rechecks_revocation_per_chunk() {
+    use crate::history::{Export, respond};
+    let bytes: Arc<[u8]> = Arc::from(vec![b'x'; 70_000]);
+    let meta = metadata(&bytes);
+    let (mut sender, mut receiver) = tokio::io::duplex(4096);
+    let calls = AtomicUsize::new(0);
+    let task = tokio::spawn(async move {
+        respond(
+            &mut sender,
+            Ok((
+                7,
+                Export::Body {
+                    event: event(),
+                    metadata: meta,
+                    bytes,
+                },
+            )),
+            |token| token == 7 && calls.fetch_add(1, Ordering::SeqCst) < 2,
+        )
+        .await
+    });
+    assert!(matches!(
+        read_frame(&mut receiver).await.unwrap(),
+        FrameV2::HistoryBody { .. }
+    ));
+    let mut received = Vec::new();
+    receiver.read_to_end(&mut received).await.unwrap();
+    assert_eq!(received.len(), 65_536);
+    assert_eq!(
+        task.await.unwrap(),
+        Err("history export permission changed".into())
+    );
+    for authorized in [false, true] {
+        let (mut sender, mut receiver) = tokio::io::duplex(4096);
+        let task = tokio::spawn(async move {
+            respond(
+                &mut sender,
+                Ok((
+                    1,
+                    Export::Body {
+                        event: event(),
+                        metadata: metadata(b"expected"),
+                        bytes: Arc::from(&b"tampered"[..]),
+                    },
+                )),
+                |_| authorized,
+            )
+            .await
+        });
+        assert!(
+            matches!(read_frame(&mut receiver).await.unwrap(),FrameV2::Error { code } if code == if authorized { "history_unavailable" } else { "history_denied" })
+        );
+        task.await.unwrap().unwrap();
+    }
+}

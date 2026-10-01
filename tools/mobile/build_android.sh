@@ -51,7 +51,7 @@ out = repo / "target/mobile-android"
 out.mkdir(parents=True, exist_ok=True)
 manifest = {
     "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip(),
-    "sdk_api": 6,
+    "sdk_api": 7,
     "wire_version": 3,
     "min_sdk": 29,
     "target_sdk": 36,

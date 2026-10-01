@@ -90,7 +90,7 @@
 "connection" = "Connexion";
 "receiving" = "Réception";
 "sending" = "Envoi";
-"receive_help" = "Récupérez l’historique récent pendant que l’application est ouverte. Le contenu reste dans l’application jusqu’à Copier.";
+"receive_help" = "Quand cette app est ouverte, recevez les nouvelles copies et récupérez l’historique récent. Les copies restent dans l’app jusqu’à ce que vous touchiez Copier.";
 "send_help" = "L’envoi est toujours manuel. Collez, puis envoyez.";
 "device_fingerprint" = "Empreinte de l’appareil";
 "confirm_device" = "Confirmer cet appareil";
@@ -105,3 +105,8 @@
 "system_language" = "Langue du système";
 "unsupported_text" = "Texte trop grand ou non pris en charge";
 "send_partial" = "Certains appareils n’ont pas confirmé ; vérifiez leur état";
+
+"history_unsupported" = "Mettez à jour le client de cet appareil pour récupérer son historique";
+"device_can_receive" = "%d appareil peut recevoir";
+"history_empty_filtered" = "Aucune copie correspondante";
+"history_empty_filtered_help" = "Aucune copie récente ne correspond à ce filtre.";

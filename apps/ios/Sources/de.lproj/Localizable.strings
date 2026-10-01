@@ -90,7 +90,7 @@
 "connection" = "Verbindung";
 "receiving" = "Empfangen";
 "sending" = "Senden";
-"receive_help" = "Rufe aktuelle Einträge ab, während die App geöffnet ist. Inhalte bleiben in der App, bis du Kopieren antippst.";
+"receive_help" = "Bei geöffneter App neue Kopien empfangen und den letzten Verlauf abrufen. Kopien bleiben in der App, bis du auf Kopieren tippst.";
 "send_help" = "Senden erfolgt immer manuell. Erst Einfügen, dann Senden.";
 "device_fingerprint" = "Gerätefingerabdruck";
 "confirm_device" = "Dieses Gerät bestätigen";
@@ -105,3 +105,8 @@
 "system_language" = "Systemstandard";
 "unsupported_text" = "Text zu groß oder nicht unterstützt";
 "send_partial" = "Einige Geräte haben nicht bestätigt; prüfen Sie ihren Status";
+
+"history_unsupported" = "Für Verlaufsabfragen benötigt dieses Gerät einen neueren Client";
+"device_can_receive" = "%d Gerät kann empfangen";
+"history_empty_filtered" = "Keine passenden Kopien";
+"history_empty_filtered_help" = "Keine aktuellen Kopien entsprechen diesem Filter.";

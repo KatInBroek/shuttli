@@ -17,22 +17,28 @@ Shared means the same Rust source compiled for each target through Cargo path de
 | Component | Reuse and required changes |
 | --- | --- |
 | model, core | Same source; separate permission to fetch a history body from permission to write the OS clipboard. Gate history export by authenticated identity and current send/type/history policy; preserve desktop invariants without an offline eligibility ledger. |
-| application, ports, api | Same use cases and contracts; add explicit import, draft, local copy, bounded history catch-up, negotiated capabilities and foreground lifecycle. |
-| runtime | Bounded serial scheduling with explicit start, pause and stop. |
-| protocol | Extract shared version dispatch, framing and receipt contracts. |
-| adapters-common | Extract TLS, normalization, identity, encryption and storage from desktop-specific adapters. |
-| desktop adapters | Keep Tailscale enumeration, X11, macOS helper, autostart and desktop notifications here. |
-| mobile-sdk | Composition root assembling application/runtime/common adapters and injected native services. |
+| application, ports, api | Desktop application and local control contracts. Mobile foreground/cache orchestration stays in the SDK; policy and event authority remain in the common core. |
+| runtime | Desktop bounded worker scheduling. Mobile transport uses a bounded foreground Tokio runtime owned by its lifecycle adapter. |
+| protocol | Common HELLO version dispatch and bounded live/history/roster value codecs. |
+| identity, content, transport | Shared TLS identity, canonical content validation, HELLO framing, live transfer mechanics and history response service. |
+| desktop adapters | Tailscale enumeration, X11, macOS helper, autostart, session storage and desktop notifications. |
+| mobile-sdk | Foreground lifecycle and bounded cache adapter, with the same SyncCore permission/publication/reception authority and shared wire services. |
 | mobile-ffi | Generated UniFFI boundary and Swift/Kotlin bindings. |
 | native apps | Independent SwiftUI and Compose UIs, clipboard/lifecycle adapters, packaging and real-device tests. |
 
 The transport shares framing, payload validation, permission rechecks and OFFER/READY/body/APPLIED mechanics through `crates/transport`. Its sender and receiver do not distinguish device kinds. A native reception adapter commits content before APPLIED: the desktop writes/readbacks its clipboard and keeps its existing durable receipt; the mobile app verifies and accepts a bounded history-cache item. The phone OS clipboard is touched only by explicit Copy. A mobile live receipt is session-scoped: clear/eviction/restart may make a subsequent STATUS query Unknown. HISTORY_GET remains a separate request that caches content without creating a live receipt or publishing an event.
 
-Proposed additions:
+Every endpoint that advertises history queries must serve both HISTORY_LIST and HISTORY_GET as well as consume replies. Desktop storage and the foreground app cache supply different snapshot adapters to the same history responder; both use the same core authorization rules and revocable policy revisions. Export only retained events created by the exporting identity in its current process session, never imported copies. The mobile process session epoch survives foreground listener restarts so resuming does not hide its own retained sends.
+
+Peer discovery is renewed before hint expiry. Directly authenticated endpoints remain retry candidates after a disconnect even if the original roster hint expires. Concurrent connections choose the same identity-ordered initiator preference; superseded routes cannot mark a replacement offline. Notices never acknowledge a transfer or consume a request turn.
+
+Workspace layout:
 
 ```text
 crates/protocol/
-crates/adapters-common/
+crates/identity/
+crates/content/
+crates/transport/
 crates/mobile-sdk/
 crates/mobile-ffi/
 apps/ios/                 # Xcode project, SwiftUI, platform adapters, tests

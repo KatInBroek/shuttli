@@ -95,7 +95,8 @@
       "protocol",
       "value",
       "content",
-      "transport"
+      "transport",
+      "core"
     ],
     "mobile-ffi": [
       "identity",
@@ -103,7 +104,8 @@
       "protocol",
       "value",
       "content",
-      "transport"
+      "transport",
+      "core"
     ],
     "protocol": [
       "value"

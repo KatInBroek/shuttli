@@ -84,7 +84,7 @@ fn native_ui_identity_and_content_policy_use_authenticated_identity() {
 #[test]
 fn native_bridge_preserves_one_session_across_lifecycle() {
     let session = MobileSession::new();
-    assert_eq!(sdk_api_version(), 6);
+    assert_eq!(sdk_api_version(), 7);
     let first = session.enter_foreground();
     session.enter_background();
     assert!(session.enter_foreground() > first);
@@ -202,4 +202,38 @@ fn native_history_returns_only_verified_cached_content() {
     assert_eq!(session.history_body(key), data);
     session.clear_history();
     assert!(session.history_rows().is_empty());
+}
+
+#[test]
+fn device_status_distinguishes_unsupported_offline_and_disabled_history() {
+    let session = MobileSession::new();
+    session.enter_foreground();
+    let bytes = generate_identity_bytes();
+    let _ = session.start_listener(bytes, "127.0.0.1".into(), "Peer".into());
+    let peers = session.peers.lock().unwrap().as_ref().unwrap().clone();
+    let id = [2; 32];
+    peers
+        .lock()
+        .unwrap()
+        .observed_direct(
+            id,
+            "Legacy".into(),
+            "100.64.0.2:45987".into(),
+            shuttli_model::mobile::Capabilities::legacy_desktop(),
+        )
+        .unwrap();
+    assert!(matches!(
+        session.device_rows()[0].history_activity,
+        MobileHistoryActivity::Unsupported
+    ));
+    peers.lock().unwrap().disconnected(id);
+    assert!(matches!(
+        session.device_rows()[0].history_activity,
+        MobileHistoryActivity::Unavailable
+    ));
+    session.set_receive(hex::encode(id), false);
+    assert!(matches!(
+        session.device_rows()[0].history_activity,
+        MobileHistoryActivity::Paused
+    ));
 }

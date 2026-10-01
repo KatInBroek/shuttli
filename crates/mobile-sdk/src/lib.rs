@@ -1,6 +1,7 @@
 //! Session-only mobile history. Network adapters supply authenticated pages;
 //! this crate never accesses the OS clipboard. Text stays in memory; images
 //! may use encrypted temporary objects with a process-local key.
+mod history_export;
 pub mod image_cache;
 pub mod peers;
 pub mod transport;
@@ -125,6 +126,9 @@ impl MobileHistory {
         self.query_enabled() && self.mode == HistoryMode::Content
     }
     pub fn set_mode(&mut self, mode: HistoryMode) {
+        if self.mode != mode {
+            self.generation = self.generation.wrapping_add(1);
+        }
         self.mode = mode;
         if mode == HistoryMode::Off {
             self.rows.clear();
@@ -138,6 +142,9 @@ impl MobileHistory {
     pub fn set_limit(&mut self, limit: usize) -> bool {
         if limit > 10_000 {
             return false;
+        }
+        if self.limit != limit {
+            self.generation = self.generation.wrapping_add(1);
         }
         self.limit = limit;
         self.trim();

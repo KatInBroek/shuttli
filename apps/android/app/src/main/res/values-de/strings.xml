@@ -91,7 +91,7 @@
     <string name="connection">Verbindung</string>
     <string name="receiving">Empfangen</string>
     <string name="sending">Senden</string>
-    <string name="receive_help">Rufe aktuelle Einträge ab, während die App geöffnet ist. Inhalte bleiben in der App, bis du Kopieren antippst.</string>
+    <string name="receive_help">Bei geöffneter App neue Kopien empfangen und den letzten Verlauf abrufen. Kopien bleiben in der App, bis du auf Kopieren tippst.</string>
     <string name="send_help">Senden erfolgt immer manuell. Erst Einfügen, dann Senden.</string>
     <string name="device_fingerprint">Gerätefingerabdruck</string>
     <string name="confirm_device">Dieses Gerät bestätigen</string>
@@ -105,4 +105,8 @@
     <string name="language">Sprache</string>
     <string name="system_language">Systemstandard</string>
     <string name="send_partial">Einige Geräte haben nicht bestätigt; prüfen Sie ihren Status</string>
+    <string name="history_unsupported">Für Verlaufsabfragen benötigt dieses Gerät einen neueren Client</string>
+    <string name="device_can_receive">%1$d Gerät kann empfangen</string>
+    <string name="history_empty_filtered">Keine passenden Kopien</string>
+    <string name="history_empty_filtered_help">Keine aktuellen Kopien entsprechen diesem Filter.</string>
 </resources>

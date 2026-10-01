@@ -4,6 +4,7 @@ use shuttli_model::{
     mobile::HistorySummary,
     sync::{Format, Metadata},
 };
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test(flavor = "current_thread")]
 async fn partial_control_frame_survives_cancelled_read_future() {
@@ -61,10 +62,32 @@ async fn session_cleanup_preserves_replacement_and_settles_only_its_source() {
         stop,
         refresh: watch::channel(0).1,
     };
-    let (old, _) = mpsc::channel(8);
+    let (old, mut old_receiver) = mpsc::channel(8);
     let (current, _) = mpsc::channel(8);
-    context.routes.lock().await.insert(source, current.clone());
+    register_route(&context, source, source, old.clone())
+        .await
+        .unwrap();
+    register_route(&context, source, [1; 32], current.clone())
+        .await
+        .unwrap();
+    assert!(
+        register_route(&context, source, source, old.clone())
+            .await
+            .is_err()
+    );
+    assert!(
+        register_route(&context, source, [1; 32], old.clone())
+            .await
+            .is_err()
+    );
+    assert!(
+        context.routes.lock().await[&source]
+            .commands
+            .same_channel(&current)
+    );
     finish_session(&context, source, generation, &old).await;
+    drop(old);
+    assert!(old_receiver.recv().await.is_none());
     assert_eq!(
         history.lock().unwrap().source(source).unwrap().receiving,
         Some(event)
@@ -118,7 +141,7 @@ fn changed_hint_cannot_query_after_receive_or_history_is_disabled() {
     let context = SessionContext {
         identity: Arc::new(identity),
         name: "Phone".into(),
-        epoch: [4; 16],
+        epoch: peers.lock().unwrap().epoch(),
         history: history.clone(),
         peers: peers.clone(),
         results: Arc::new(Mutex::new(BTreeMap::new())),
@@ -188,7 +211,7 @@ async fn foreground_session_fetches_into_app_cache_without_os_copy() {
     let context = SessionContext {
         identity: Arc::new(Identity::generate().unwrap().0),
         name: "Phone".into(),
-        epoch: [4; 16],
+        epoch: peers.lock().unwrap().epoch(),
         history: history.clone(),
         peers: peers.clone(),
         results: Arc::new(Mutex::new(BTreeMap::new())),
@@ -424,7 +447,7 @@ async fn incoming_tls_binds_identity_before_history_and_explicit_sending() {
         let context = SessionContext {
             identity: Arc::new(phone_identity),
             name: "Phone".into(),
-            epoch: [4; 16],
+            epoch: peers.lock().unwrap().epoch(),
             history: history.clone(),
             peers: peers.clone(),
             results: Arc::new(Mutex::new(BTreeMap::new())),
@@ -439,7 +462,7 @@ async fn incoming_tls_binds_identity_before_history_and_explicit_sending() {
         let server_context = context.clone();
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
-            accept_desktop(stream, "100.64.0.2:45987".parse().unwrap(), server_context).await
+            accept_peer(stream, "100.64.0.2:45987".parse().unwrap(), server_context).await
         });
         let stream = TcpStream::connect(address).await.unwrap();
         let name = rustls::pki_types::ServerName::try_from("shuttli.local").unwrap();
@@ -511,25 +534,17 @@ async fn incoming_tls_binds_identity_before_history_and_explicit_sending() {
             )
             .unwrap();
         let body: Arc<[u8]> = Arc::from(&b"explicit phone send"[..]);
-        let event = EventId {
-            origin: own,
-            epoch: context.epoch,
-            seq: 1,
-        };
-        let route = context.routes.lock().await.get(&source).cloned().unwrap();
-        route
-            .send(SendCommand {
-                event,
-                target: source,
-                metadata: Metadata {
-                    format: Format::Text,
-                    size: body.len() as u64,
-                    digest: shuttli_content::canonical_digest(Format::Text, &body).unwrap(),
-                },
-                body: body.clone(),
-            })
+        let command = test_command(&peers, source, body.clone());
+        let event = command.event();
+        let route = context
+            .routes
+            .lock()
             .await
-            .unwrap();
+            .get(&source)
+            .unwrap()
+            .commands
+            .clone();
+        route.send(command).await.unwrap();
         assert!(
             matches!(timeout(Duration::from_secs(1), read_frame(&mut desktop)).await.unwrap().unwrap(), FrameV2::Offer { event: e, .. } if e == event)
         );
@@ -561,24 +576,9 @@ async fn incoming_tls_binds_identity_before_history_and_explicit_sending() {
 async fn explicit_offer_requires_send_consent_and_applied_reply() {
     let (identity, _) = Identity::generate().unwrap();
     let source = [2; 32];
-    let epoch = [4; 16];
-    let event = EventId {
-        origin: identity.id,
-        epoch,
-        seq: 1,
-    };
     let bytes: Arc<[u8]> = Arc::from(&b"manual copy"[..]);
-    let command = SendCommand {
-        event,
-        target: source,
-        metadata: Metadata {
-            format: Format::Text,
-            size: bytes.len() as u64,
-            digest: shuttli_content::canonical_digest(Format::Text, &bytes).unwrap(),
-        },
-        body: bytes.clone(),
-    };
     let peers = Arc::new(Mutex::new(PeerDirectory::new(identity.id)));
+    let epoch = peers.lock().unwrap().epoch();
     peers
         .lock()
         .unwrap()
@@ -588,6 +588,23 @@ async fn explicit_offer_requires_send_consent_and_applied_reply() {
             "100.100.100.2:45987".into(),
             Capabilities::desktop(),
         )
+        .unwrap();
+    peers
+        .lock()
+        .unwrap()
+        .directions(
+            source,
+            crate::peers::Directions {
+                send: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let command = test_command(&peers, source, bytes.clone());
+    peers
+        .lock()
+        .unwrap()
+        .directions(source, Default::default())
         .unwrap();
     let (_, stop) = watch::channel(false);
     let context = SessionContext {
@@ -646,6 +663,12 @@ async fn explicit_offer_requires_send_consent_and_applied_reply() {
             },
         )
         .unwrap();
+    assert_eq!(
+        send_offer(&mut phone, &command, &context).await.unwrap(),
+        SendState::Failed
+    );
+    let command = test_command(&peers, source, bytes.clone());
+    let event = command.event();
     let task = tokio::spawn(async move { send_offer(&mut phone, &command, &context).await });
     assert!(
         matches!(read_frame(&mut desktop).await.unwrap(), FrameV2::Offer { event: offered, .. } if offered == event)
@@ -693,9 +716,9 @@ async fn live_and_pull_interleave_in_both_identity_orders_without_forwarding_or_
         let context = SessionContext {
             identity: Arc::new(identity),
             name: "Peer".into(),
-            epoch: [4; 16],
+            epoch: peers.lock().unwrap().epoch(),
             history: history.clone(),
-            peers,
+            peers: peers.clone(),
             results: Arc::new(Mutex::new(BTreeMap::new())),
             routes: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
             stop: stop_rx,
@@ -712,7 +735,7 @@ async fn live_and_pull_interleave_in_both_identity_orders_without_forwarding_or_
             write_frame(&mut remote, &FrameV2::Poll).await.unwrap();
         }
         assert!(matches!(
-            read_frame(&mut remote).await.unwrap(),
+            read_operation(&mut remote).await.unwrap(),
             FrameV2::HistoryListRequest { .. }
         ));
         write_frame(
@@ -728,7 +751,7 @@ async fn live_and_pull_interleave_in_both_identity_orders_without_forwarding_or_
         .unwrap();
         if !desktop_leads {
             assert!(matches!(
-                read_frame(&mut remote).await.unwrap(),
+                read_operation(&mut remote).await.unwrap(),
                 FrameV2::Poll
             ));
         }
@@ -742,13 +765,13 @@ async fn live_and_pull_interleave_in_both_identity_orders_without_forwarding_or_
             .await
             .unwrap();
         assert!(matches!(
-            read_frame(&mut remote).await.unwrap(),
+            read_operation(&mut remote).await.unwrap(),
             FrameV2::Receipt { event: queried, state: Some(shuttli_model::sync::DeliveryState::Unknown) }
                 if queried == previous
         ));
         if !desktop_leads {
             assert!(matches!(
-                read_frame(&mut remote).await.unwrap(),
+                read_operation(&mut remote).await.unwrap(),
                 FrameV2::Poll
             ));
         }
@@ -773,12 +796,12 @@ async fn live_and_pull_interleave_in_both_identity_orders_without_forwarding_or_
         .await
         .unwrap();
         assert!(matches!(
-            read_frame(&mut remote).await.unwrap(),
+            read_operation(&mut remote).await.unwrap(),
             FrameV2::Ready
         ));
         remote.write_all(body).await.unwrap();
         assert!(matches!(
-            read_frame(&mut remote).await.unwrap(),
+            read_operation(&mut remote).await.unwrap(),
             FrameV2::Applied
         ));
         assert_eq!(
@@ -793,25 +816,10 @@ async fn live_and_pull_interleave_in_both_identity_orders_without_forwarding_or_
             context.results.lock().unwrap().is_empty(),
             "reception cannot publish or forward"
         );
-        let outgoing = EventId {
-            origin: own,
-            epoch: context.epoch,
-            seq: 1,
-        };
         let bytes: Arc<[u8]> = Arc::from(&b"explicit local send"[..]);
-        sender
-            .send(SendCommand {
-                event: outgoing,
-                target: source,
-                metadata: Metadata {
-                    format: Format::Text,
-                    size: bytes.len() as u64,
-                    digest: shuttli_content::canonical_digest(Format::Text, &bytes).unwrap(),
-                },
-                body: bytes.clone(),
-            })
-            .await
-            .unwrap();
+        let command = test_command(&peers, source, bytes.clone());
+        let outgoing = command.event();
+        sender.send(command).await.unwrap();
         refresh.send_modify(|r| *r += 1);
         let mut sent = false;
         let mut listed = false;
@@ -819,7 +827,7 @@ async fn live_and_pull_interleave_in_both_identity_orders_without_forwarding_or_
             if desktop_leads {
                 write_frame(&mut remote, &FrameV2::Poll).await.unwrap();
             }
-            match timeout(Duration::from_secs(2), read_frame(&mut remote))
+            match timeout(Duration::from_secs(2), read_operation(&mut remote))
                 .await
                 .unwrap()
                 .unwrap()
@@ -895,12 +903,13 @@ async fn original_v1_tls_peer_can_send_and_receive_with_app_cache_adapter() {
     let history = Arc::new(Mutex::new(MobileHistory::default()));
     history.lock().unwrap().enter_foreground();
     let (stop, stop_rx) = watch::channel(false);
+    let peers = Arc::new(Mutex::new(PeerDirectory::new(phone.id)));
     let context = SessionContext {
         identity: Arc::new(phone),
         name: "Peer".into(),
-        epoch: [4; 16],
+        epoch: peers.lock().unwrap().epoch(),
         history: history.clone(),
-        peers: Arc::new(Mutex::new(PeerDirectory::new([1; 32]))),
+        peers: peers.clone(),
         results: Arc::new(Mutex::new(BTreeMap::new())),
         routes: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
         stop: stop_rx,
@@ -911,7 +920,7 @@ async fn original_v1_tls_peer_can_send_and_receive_with_app_cache_adapter() {
     let running = context.clone();
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
-        accept_desktop(stream, "100.64.0.2:45987".parse().unwrap(), running).await
+        accept_peer(stream, "100.64.0.2:45987".parse().unwrap(), running).await
     });
     let mut remote = TlsConnector::from(remote_identity.client.clone())
         .connect(
@@ -1042,21 +1051,17 @@ async fn original_v1_tls_peer_can_send_and_receive_with_app_cache_adapter() {
             },
         )
         .unwrap();
-    let own = EventId {
-        origin: context.identity.id,
-        epoch: context.epoch,
-        seq: 1,
-    };
-    let route = context.routes.lock().await.get(&source).cloned().unwrap();
-    route
-        .send(SendCommand {
-            event: own,
-            target: source,
-            metadata: meta.clone(),
-            body: Arc::from(&bytes[..]),
-        })
+    let command = test_command(&context.peers, source, Arc::from(&bytes[..]));
+    let own = command.event();
+    let route = context
+        .routes
+        .lock()
         .await
-        .unwrap();
+        .get(&source)
+        .unwrap()
+        .commands
+        .clone();
+    route.send(command).await.unwrap();
     write_live_frame(&mut remote, &FrameV2::Poll, WireVersion::V1)
         .await
         .unwrap();
@@ -1116,4 +1121,195 @@ async fn original_v1_tls_peer_can_send_and_receive_with_app_cache_adapter() {
     .unwrap();
     assert_eq!(server.await.unwrap().unwrap_err(), "receipt owner mismatch");
     stop.send(true).unwrap();
+}
+
+fn test_command(
+    peers: &Arc<Mutex<PeerDirectory>>,
+    target: DeviceId,
+    body: Arc<[u8]>,
+) -> SendCommand {
+    let metadata = Metadata {
+        format: Format::Text,
+        size: body.len() as u64,
+        digest: shuttli_content::canonical_digest(Format::Text, &body).unwrap(),
+    };
+    let permit = peers
+        .lock()
+        .unwrap()
+        .manual(&metadata)
+        .unwrap()
+        .into_iter()
+        .find(|p| p.target() == target)
+        .unwrap();
+    SendCommand {
+        permit: Arc::new(permit),
+        body,
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn two_endpoints_pull_each_others_history_and_keep_live_delivery_and_clear_working() {
+    let identities = [
+        Identity::generate().unwrap().0,
+        Identity::generate().unwrap().0,
+    ];
+    let ids = [identities[0].id, identities[1].id];
+    let mut contexts = Vec::new();
+    let mut stops = Vec::new();
+    let mut receivers = Vec::new();
+    let mut senders = Vec::new();
+    for (i, identity) in identities.into_iter().enumerate() {
+        let mut directory = PeerDirectory::new(identity.id);
+        let other = ids[1 - i];
+        directory
+            .observed_direct(
+                other,
+                "Peer".into(),
+                format!("100.64.0.{}:45987", 2 - i),
+                Capabilities::live(),
+            )
+            .unwrap();
+        directory
+            .directions(
+                other,
+                crate::peers::Directions {
+                    send: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let history = Arc::new(Mutex::new(MobileHistory::new(100)));
+        let generation = history.lock().unwrap().enter_foreground();
+        let (stop, stop_rx) = watch::channel(false);
+        let (sender, receiver) = mpsc::channel(8);
+        let context = SessionContext {
+            epoch: directory.epoch(),
+            identity: Arc::new(identity),
+            name: "Peer".into(),
+            history,
+            peers: Arc::new(Mutex::new(directory)),
+            results: Arc::new(Mutex::new(BTreeMap::new())),
+            routes: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
+            stop: stop_rx,
+            refresh: watch::channel(0).1,
+        };
+        // More than one page forces a follower to request another grant after
+        // a reply, exercising the same turn protocol in either identity order.
+        for seq in 0..23 {
+            let command = test_command(
+                &context.peers,
+                other,
+                Arc::from(format!("copy {i}-{seq}").into_bytes()),
+            );
+            context
+                .history
+                .lock()
+                .unwrap()
+                .record_local_sent(
+                    generation,
+                    command.event(),
+                    command.metadata().clone(),
+                    command.body,
+                    100 + seq,
+                )
+                .unwrap();
+        }
+        contexts.push(context);
+        stops.push(stop);
+        senders.push(sender);
+        receivers.push(receiver);
+    }
+    let (mut first, mut second) = tokio::io::duplex(4096);
+    let a = contexts[0].clone();
+    let b = contexts[1].clone();
+    let a_epoch = a.epoch;
+    let b_epoch = b.epoch;
+    let mut receivers = receivers.into_iter();
+    let a_rx = receivers.next().unwrap();
+    let b_rx = receivers.next().unwrap();
+    let sessions = [
+        tokio::spawn(async move { mobile_session(&mut first, ids[1], b_epoch, 1, &a, a_rx).await }),
+        tokio::spawn(
+            async move { mobile_session(&mut second, ids[0], a_epoch, 1, &b, b_rx).await },
+        ),
+    ];
+    timeout(Duration::from_secs(8), async {
+        loop {
+            if contexts.iter().enumerate().all(|(i, c)| {
+                c.history
+                    .lock()
+                    .unwrap()
+                    .timeline()
+                    .iter()
+                    .filter(|r| r.source == ids[1 - i] && r.body.is_some())
+                    .count()
+                    == 23
+            }) {
+                break;
+            }
+            assert!(
+                !sessions.iter().any(|s| s.is_finished()),
+                "history requests must not disconnect peers"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("bidirectional paginated history bodies");
+    let command = test_command(&contexts[0].peers, ids[1], Arc::from(&b"new live copy"[..]));
+    let event = command.event();
+    senders[0].send(command).await.unwrap();
+    timeout(Duration::from_secs(3), async {
+        while contexts[0].results.lock().unwrap().get(&(event, ids[1])) != Some(&SendState::Applied)
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        contexts[1]
+            .history
+            .lock()
+            .unwrap()
+            .live_receipt_available(event)
+    );
+    contexts[1].history.lock().unwrap().clear();
+    contexts[1].refresh.clone().mark_changed();
+    timeout(Duration::from_secs(8), async {
+        while !contexts[1]
+            .history
+            .lock()
+            .unwrap()
+            .timeline()
+            .iter()
+            .any(|r| r.source == ids[0] && r.body.is_some())
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("clearing a cache must not disable the existing session");
+    for stop in stops {
+        stop.send(true).unwrap();
+    }
+    for session in sessions {
+        let result = session.await.unwrap();
+        assert!(
+            result.is_ok() || result == Err("session closed".into()),
+            "{result:?}"
+        );
+    }
+}
+
+async fn read_operation<S: AsyncRead + Unpin>(stream: &mut S) -> Result<FrameV2> {
+    loop {
+        let frame = read_frame(stream).await?;
+        if !matches!(
+            frame,
+            FrameV2::PeerList { .. } | FrameV2::HistoryChanged { .. }
+        ) {
+            return Ok(frame);
+        }
+    }
 }
