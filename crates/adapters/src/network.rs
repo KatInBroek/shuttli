@@ -13,7 +13,7 @@ use shuttli_transport::{
     read_frame as read_v2_frame, read_hello, write_frame as write_v2_frame, write_hello,
 };
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     net::{IpAddr, SocketAddr},
     sync::{
         Arc,
@@ -505,7 +505,25 @@ async fn connect_attempt(
 }
 async fn discover(s: Arc<Shared>, mut addresses: Vec<IpAddr>, refresh: Arc<tokio::sync::Notify>) {
     let attempts = Arc::new(Semaphore::new(16));
+    let active_probes = Arc::new(Mutex::new(HashSet::new()));
+    let mut roster = tokio::time::interval(Duration::from_secs(30));
+    let mut probe = tokio::time::interval(Duration::from_secs(5));
+    roster.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    probe.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // The startup snapshot already supplied addresses. The first probe is
+    // immediate; fetching the next roster can wait for its own interval.
+    roster.tick().await;
     loop {
+        let update_roster = tokio::select! {
+            _ = probe.tick() => false,
+            _ = roster.tick() => true,
+            _ = refresh.notified() => true,
+        };
+        if update_roster {
+            if let Ok(Ok(net)) = tokio::task::spawn_blocking(discovery::snapshot).await {
+                addresses = net.peers;
+            }
+        }
         for address in &addresses {
             let address = SocketAddr::new(*address, PORT);
             let connected =
@@ -513,18 +531,23 @@ async fn discover(s: Arc<Shared>, mut addresses: Vec<IpAddr>, refresh: Arc<tokio
                     v.peer.address == address.to_string() && v.live.load(Ordering::SeqCst)
                 });
             if !connected {
+                let mut active = active_probes.lock().await;
+                // A slow handshake must not create another connection on each
+                // probe tick or manual refresh.
+                if active.contains(&address) {
+                    continue;
+                }
                 if let Ok(slot) = attempts.clone().try_acquire_owned() {
+                    active.insert(address);
+                    let active_probes = active_probes.clone();
                     let s = s.clone();
                     tokio::spawn(async move {
                         let _slot = slot;
                         let _ = connect(s, address).await;
+                        active_probes.lock().await.remove(&address);
                     });
                 }
             }
-        }
-        tokio::select! {_=tokio::time::sleep(Duration::from_secs(30))=>{},_=refresh.notified()=>{}}
-        if let Ok(Ok(net)) = tokio::task::spawn_blocking(discovery::snapshot).await {
-            addresses = net.peers;
         }
     }
 }
