@@ -1,6 +1,13 @@
 import XCTest
 
 final class NavigationTests: XCTestCase {
+    private func capture(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testWindowUsesTheFullScreenAspectRatio() {
         let app = XCUIApplication()
         app.launch()
@@ -11,6 +18,7 @@ final class NavigationTests: XCTestCase {
         XCTAssertGreaterThan(window.height, 0)
         XCTAssertEqual(window.height / window.width, screen.height / screen.width, accuracy: 0.03,
                        "The app must use the device screen, without legacy letterboxing")
+        capture(app, "full-screen-home")
     }
 
     func testDutchHistoryFiltersStayOnOneLine() {
@@ -23,6 +31,7 @@ final class NavigationTests: XCTestCase {
         XCTAssertTrue(sent.exists)
         XCTAssertEqual(all.frame.height, sent.frame.height, accuracy: 2,
                        "Long localized filters should scroll horizontally rather than wrap")
+        capture(app, "dutch-history-filters")
     }
 
     func testThreeTabsAndExplicitSendPanelNavigation() {
@@ -32,11 +41,22 @@ final class NavigationTests: XCTestCase {
         XCTAssertTrue(app.tabBars.buttons["Home"].waitForExistence(timeout: 10))
         XCTAssertEqual(app.tabBars.buttons.count, 3)
         XCTAssertTrue(app.staticTexts["Send clipboard"].exists)
+        capture(app, "home")
+        app.buttons["Images"].tap()
+        XCTAssertTrue(app.staticTexts["No matching copies"].exists)
+        XCTAssertFalse(app.staticTexts["No recent copies"].exists)
+        capture(app, "filtered-history")
+        app.buttons["All"].tap()
         app.tabBars.buttons["Devices"].tap()
         XCTAssertFalse(app.staticTexts["Send clipboard"].exists)
+        capture(app, "devices")
         app.tabBars.buttons["Settings"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "This phone")).firstMatch.exists)
         XCTAssertFalse(app.staticTexts["Send clipboard"].exists)
+        capture(app, "settings")
+        app.swipeUp()
+        XCTAssertTrue(app.staticTexts["App version"].exists)
+        capture(app, "settings-about")
         app.tabBars.buttons["Home"].tap()
         XCTAssertTrue(app.staticTexts["Send clipboard"].exists)
     }
