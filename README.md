@@ -2,13 +2,19 @@
 
 Peer-to-peer clipboard sync with per-device permissions and verified delivery.
 
-**Development build:** Tailscale discovery and macOS ↔ Linux text and image synchronization are implemented. LAN discovery, Windows, and file transfer remain later work. Machine-specific configuration, screenshots and run reports are kept outside the repository.
+**Preview:** Tailscale discovery, macOS ↔ Linux text and image synchronization, and foreground iOS/Android apps are implemented. LAN discovery, Windows, and file transfer remain later work. Machine-specific configuration, screenshots and run reports are kept outside the repository.
 
 ## Download
 
-**[Download for Ubuntu 24.04+ · Intel/AMD 64-bit (.deb)](https://github.com/KatInBroek/shuttli/releases)**
+**[Download packages and release notes](https://github.com/KatInBroek/shuttli/releases)**
 
-[Release notes and checksums](https://github.com/KatInBroek/shuttli/releases) · [Installation guide](docs/install/ubuntu.md)
+| Platform | Preview package |
+| --- | --- |
+| Ubuntu 24.04+ · Intel/AMD 64-bit | `.deb` installer |
+| Android 10+ · ARM64 / x86_64 | Debug-signed test APK; unsigned release APK/AAB for external signing |
+| iOS 16+ · iPhone / iPad | Unsigned device IPA; sign for your device before installation |
+
+[Ubuntu installation](docs/install/ubuntu.md) · [Android](docs/mobile/android.md) · [iOS signing and installation](docs/mobile/ios.md)
 
 This is a **preview release**. macOS packages, Windows packages and Linux ARM64
 packages are not yet published. Tailscale must be installed separately.
@@ -25,6 +31,7 @@ packages are not yet published. Tailscale must be installed separately.
 - macOS menu bar/native window; Linux system tray with global send/receive controls and an on-demand GTK4 window; the same local API powers CLI and UI.
 - Linux UI languages: English, Nederlands, Deutsch, Français, or follow the system. Switch in **Settings → Language**; menus, windows and common notifications update without restarting.
 - Optional notifications and start at graphical login. Installation never enables autostart.
+- Native iOS and Android foreground apps: merged recent history, explicit clipboard import/send/copy, per-device permissions and four languages. Incoming content stays in app history until you choose Copy; synchronization stops in the background.
 
 ## Ubuntu package
 
@@ -43,7 +50,7 @@ python3 tools/install.py
 shuttli ui
 ```
 
-On Linux, the tray icon opens a menu with **Open application**, **Enable sending**, **Enable receiving**, **Send clipboard now**, and **Quit**. The icon distinguishes both directions enabled, send only, receive only, and both paused. Closing the window keeps the tray and agent running. **Quit** or `shuttli quit` stops the background agent and tray without changing synchronization preferences or login-start registration. A StatusNotifier-compatible panel is required (tested on Xfce); desktops without a tray host retain the launcher and CLI.
+On Linux, the tray icon opens a menu with **Open window**, **Enable sending**, **Enable receiving**, **Send clipboard now**, and **Quit**. The icon distinguishes both directions enabled, send only, receive only, and both paused. Closing the window keeps the tray and agent running. **Quit** or `shuttli quit` stops the background agent and tray without changing synchronization preferences or login-start registration. A StatusNotifier-compatible panel is required (tested on Xfce); desktops without a tray host retain the launcher and CLI.
 
 The installer writes to your user account (`~/.local/bin`; also `~/Applications/Shuttli.app` on macOS). Start `shuttli daemon` in the graphical login environment if you prefer CLI-only operation. The default CLI talks to that single agent, including when called from SSH/tmux.
 
@@ -66,6 +73,8 @@ shuttli quit
 ```
 
 `shuttli --help` lists commands. Add `--json` for structured output. Settings and data live in `~/.local/share/shuttli` on Linux or `~/Library/Application Support/Shuttli` on macOS. `SHUTTLI_DATA_DIR` selects an isolated profile for development. History defaults to recent content: text/list in memory and temporary encrypted images on disk, with a session-only key. No Keychain/Secret Service is required. Restart clears history; eviction and `history clear` remove image files. Existing settings are preserved.
+
+The desktop refreshes its Tailscale device list every 30 seconds and probes cached addresses every 5 seconds, skipping connected peers. Manual refresh updates the list and probes immediately.
 
 The agent binds only its Tailscale IPv4 address, port 45987. At least one connection direction must be reachable; an established connection carries both directions. Device permission follows its public key, not its IP. The application does not alter firewall rules. If Tailscale is not ready at login, the network worker retries while local controls remain available; failed offline sends are not automatically replayed.
 
@@ -101,9 +110,9 @@ Use the [grouped roadmap](https://github.com/KatInBroek/shuttli/issues/1) or [mi
 
 - [Desktop design and UI requirements](docs/design/desktop.md)
 - [Windows and regular-file extension contracts](docs/planned/windows-and-files.md)
-- Mobile proposal: [feature requirements](docs/mobile/feature-spec.md), with [shared Rust SDK](docs/mobile/shared-sdk.md), [iOS](docs/mobile/ios.md), and [Android](docs/mobile/android.md) details
+- Mobile implementation and remaining acceptance: [feature requirements](docs/mobile/feature-spec.md), with [shared Rust SDK](docs/mobile/shared-sdk.md), [iOS](docs/mobile/ios.md), and [Android](docs/mobile/android.md) details
 
-These proposals describe unfinished work. They do not imply that the platforms or features are currently supported.
+The specifications distinguish implemented features from remaining device acceptance and planned work. Mobile previews are for testing; store distribution and production signing remain separate.
 
 Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities privately using [SECURITY.md](SECURITY.md).
 

@@ -12,7 +12,7 @@ android {
         applicationId = "org.katinbroek.shuttli"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
+        versionCode = 2
         versionName = rootProject.file("../../Cargo.toml").readText()
             .substringAfter("[workspace.package]").substringBefore("\n[")
             .lineSequence().first { it.trimStart().startsWith("version =") }

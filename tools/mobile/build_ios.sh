@@ -47,7 +47,7 @@ metadata = json.loads(subprocess.check_output(
     ['cargo', 'metadata', '--locked', '--format-version', '1', '--no-deps'], text=True))
 version = next(package['version'] for package in metadata['packages']
                if package['name'] == 'shuttli-mobile-ffi')
-Path(sys.argv[2]).write_text(f'SHUTTLI_PRODUCT_NAME = {name}\nMARKETING_VERSION = {version}\nCURRENT_PROJECT_VERSION = 1\n', encoding='utf-8')
+Path(sys.argv[2]).write_text(f'SHUTTLI_PRODUCT_NAME = {name}\nMARKETING_VERSION = {version}\nCURRENT_PROJECT_VERSION = 2\n', encoding='utf-8')
 PY
 
 for target in "$device_target" "$simulator_target"; do

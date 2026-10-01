@@ -79,10 +79,11 @@ class BrandTests(unittest.TestCase):
                 prefix, apps = root / 'prefix', root / 'apps'
                 with patch.object(sys, 'argv', [str(script), '--prefix', str(prefix), '--app-dir', str(apps)]), \
                      patch.object(sys, 'platform', platform), \
-                     patch('subprocess.check_output', return_value=name + '\n') as metadata, \
+                     patch('subprocess.check_output', side_effect=[name + '\n', name + ' 1.2.3\n']) as metadata, \
                      patch('subprocess.run'), contextlib.redirect_stdout(io.StringIO()):
                     runpy.run_path(str(script), run_name='__main__')
-                metadata.assert_called_once_with([str(binary.resolve()), '--print-product-name'], encoding='utf-8')
+                self.assertEqual(metadata.call_args_list[0].args[0], [str(binary.resolve()), '--print-product-name'])
+                self.assertEqual(metadata.call_count, 2 if platform == 'darwin' else 1)
                 self.assertEqual((prefix / 'bin/shuttli').read_bytes(), b'test executable')
                 if platform == 'linux':
                     entry = (prefix / 'share/applications/org.shuttli.Control.desktop').read_text(encoding='utf-8')
@@ -94,6 +95,8 @@ class BrandTests(unittest.TestCase):
                     self.assertEqual(info['CFBundleName'], name)
                     self.assertEqual(info['CFBundleDisplayName'], name)
                     self.assertEqual(info['CFBundleIdentifier'], 'org.shuttli.app')
+                    self.assertEqual(info['CFBundleShortVersionString'], '1.2.3')
+                    self.assertEqual(info['CFBundleVersion'], '1.2.3')
 
     def test_display_literals_are_not_reintroduced(self):
         # Technical identifiers are distinct from localized display text.
