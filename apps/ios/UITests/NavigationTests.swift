@@ -1,6 +1,35 @@
 import XCTest
 
 final class NavigationTests: XCTestCase {
+    /// Opt-in acceptance against a separately authorized, isolated real peer.
+    /// Ordinary CI has no tailnet and skips this case without fabricating data.
+    func testRealPeerHistoryAndDevicePages() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SHUTTLI_NETWORK_UI"] == "1",
+                          "Requires an external isolated peer with text and image fixtures")
+        let app = XCUIApplication()
+        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-ui-language", "en"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["ios tailnet fixture"].waitForExistence(timeout: 60))
+        capture(app, "connected-history-text")
+        app.buttons["Images"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", " · Image")).firstMatch.waitForExistence(timeout: 60))
+        XCTAssertFalse(app.staticTexts["No matching copies"].exists)
+        capture(app, "connected-history-image")
+        app.tabBars.buttons["Devices"].tap()
+        let peer = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Online")).firstMatch
+        XCTAssertTrue(peer.waitForExistence(timeout: 10))
+        capture(app, "connected-devices")
+        peer.tap()
+        XCTAssertTrue(app.staticTexts["History list updated"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.switches.firstMatch.exists)
+        capture(app, "connected-device-details")
+        app.swipeUp()
+        capture(app, "connected-device-content-permissions")
+        app.tabBars.buttons["Settings"].tap()
+        XCTAssertEqual(app.staticTexts["identity-fingerprint"].label.filter { $0.isHexDigit }.count, 64)
+        capture(app, "connected-settings")
+    }
+
     private func capture(_ app: XCUIApplication, _ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name
