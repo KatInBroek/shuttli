@@ -1,0 +1,104 @@
+import XCTest
+
+final class NavigationTests: XCTestCase {
+    /// Opt-in acceptance against a separately authorized, isolated real peer.
+    /// Ordinary CI has no tailnet and skips this case without fabricating data.
+    func testRealPeerHistoryAndDevicePages() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SHUTTLI_NETWORK_UI"] == "1",
+                          "Requires an external isolated peer with text and image fixtures")
+        let app = XCUIApplication()
+        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-ui-language", "en"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["ios tailnet fixture"].waitForExistence(timeout: 60))
+        capture(app, "connected-history-text")
+        app.buttons["Images"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", " · Image")).firstMatch.waitForExistence(timeout: 60))
+        XCTAssertFalse(app.staticTexts["No matching copies"].exists)
+        capture(app, "connected-history-image")
+        app.tabBars.buttons["Devices"].tap()
+        if let secondPeerName = ProcessInfo.processInfo.environment["SHUTTLI_NETWORK_SECOND_PEER"] {
+            let secondPeer = app.buttons.matching(NSPredicate(
+                format: "label CONTAINS %@ AND label CONTAINS %@", secondPeerName, "Online")).firstMatch
+            XCTAssertTrue(secondPeer.waitForExistence(timeout: 75),
+                          "A second peer learned through the roster must become online")
+            capture(app, "connected-second-peer")
+        }
+        let peer = app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@ AND label CONTAINS %@", "Online", "History list updated")).firstMatch
+        XCTAssertTrue(peer.waitForExistence(timeout: 10))
+        capture(app, "connected-devices")
+        peer.tap()
+        XCTAssertTrue(app.staticTexts["History list updated"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.switches.firstMatch.exists)
+        capture(app, "connected-device-details")
+        app.swipeUp()
+        capture(app, "connected-device-content-permissions")
+        app.tabBars.buttons["Settings"].tap()
+        XCTAssertEqual(app.staticTexts["identity-fingerprint"].label.filter { $0.isHexDigit }.count, 64)
+        capture(app, "connected-settings")
+    }
+
+    private func capture(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    func testWindowUsesTheFullScreenAspectRatio() {
+        let app = XCUIApplication()
+        app.launch()
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 10))
+        let window = app.windows.firstMatch.frame
+        let screen = XCUIScreen.main.screenshot().image.size
+        XCTAssertGreaterThan(window.width, 0)
+        XCTAssertGreaterThan(window.height, 0)
+        XCTAssertEqual(window.height / window.width, screen.height / screen.width, accuracy: 0.03,
+                       "The app must use the device screen, without legacy letterboxing")
+        capture(app, "full-screen-home")
+    }
+
+    func testDutchHistoryFiltersStayOnOneLine() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-AppleLanguages", "(nl)", "-AppleLocale", "nl_NL", "-ui-language", "nl"]
+        app.launch()
+        let all = app.buttons["Alles"]
+        let sent = app.buttons["Verzonden vanaf deze telefoon"]
+        XCTAssertTrue(all.waitForExistence(timeout: 10))
+        XCTAssertTrue(sent.exists)
+        XCTAssertEqual(all.frame.height, sent.frame.height, accuracy: 2,
+                       "Long localized filters should scroll horizontally rather than wrap")
+        capture(app, "dutch-history-filters")
+    }
+
+    func testThreeTabsAndExplicitSendPanelNavigation() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-ui-language", "en"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Home"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.tabBars.buttons.count, 3)
+        XCTAssertTrue(app.staticTexts["Send clipboard"].exists)
+        capture(app, "home")
+        app.buttons["Images"].tap()
+        XCTAssertTrue(app.staticTexts["No matching copies"].exists)
+        XCTAssertFalse(app.staticTexts["No recent copies"].exists)
+        capture(app, "filtered-history")
+        app.buttons["All"].tap()
+        app.tabBars.buttons["Devices"].tap()
+        XCTAssertFalse(app.staticTexts["Send clipboard"].exists)
+        capture(app, "devices")
+        app.tabBars.buttons["Settings"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "This phone")).firstMatch.exists)
+        let fingerprint = app.staticTexts["identity-fingerprint"]
+        XCTAssertTrue(fingerprint.exists)
+        XCTAssertEqual(fingerprint.label.filter { $0.isHexDigit }.count, 64,
+                       "Settings must show a real fingerprint rather than a blank identity")
+        XCTAssertFalse(app.staticTexts["Send clipboard"].exists)
+        capture(app, "settings")
+        app.swipeUp()
+        XCTAssertTrue(app.staticTexts["App version"].exists)
+        capture(app, "settings-about")
+        app.tabBars.buttons["Home"].tap()
+        XCTAssertTrue(app.staticTexts["Send clipboard"].exists)
+    }
+}

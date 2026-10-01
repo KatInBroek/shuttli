@@ -125,6 +125,47 @@ impl SyncCore {
             .cloned()
             .unwrap_or_default()
     }
+    /// Sharing a roster discloses peer identities, so it uses current outgoing
+    /// consent even though no clipboard payload is sent.
+    pub fn authorize_peer_hints(&self, requester: DeviceId) -> Result<(), Rejection> {
+        if requester == self.device || !self.peers.contains_key(&requester) {
+            return Err(Rejection::Invalid);
+        }
+        if !self.settings.send || !self.policy(requester).send {
+            return Err(Rejection::Disabled);
+        }
+        Ok(())
+    }
+    /// History export is independent of automatic live publication. Only this
+    /// device's retained local-origin events may be listed or fetched.
+    /// Call again immediately before each body transfer after asynchronous work.
+    pub fn authorize_history_export(
+        &self,
+        requester: DeviceId,
+        event: EventId,
+        meta: &Metadata,
+        body: bool,
+    ) -> Result<(), Rejection> {
+        if event.origin != self.device || event.seq == 0 {
+            return Err(Rejection::Invalid);
+        }
+        self.authorize_peer_hints(requester)?;
+        if !self.allowed(requester, meta, true) {
+            return Err(Rejection::Disabled);
+        }
+        let global_mode = self.settings.history;
+        let peer_mode = self.policy(requester).history.unwrap_or(global_mode);
+        let mode_allows = |mode| {
+            matches!(
+                (mode, body),
+                (HistoryMode::Content, _) | (HistoryMode::Status, false)
+            )
+        };
+        if !mode_allows(global_mode) || !mode_allows(peer_mode) {
+            return Err(Rejection::Disabled);
+        }
+        Ok(())
+    }
     fn allowed(&self, id: DeviceId, meta: &Metadata, send: bool) -> bool {
         let p = self.policy(id);
         (if send {

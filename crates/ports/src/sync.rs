@@ -1,5 +1,6 @@
 //! Platform ports for the running application. Payloads are bounded in adapters.
 use shuttli_core::sync::{Publication, Reception, WriteAuthorization};
+use shuttli_model::mobile::{HistoryCursor, HistoryListResponse, HistorySummary};
 use shuttli_model::sync::*;
 use std::sync::{Arc, mpsc::SyncSender};
 
@@ -55,10 +56,32 @@ pub trait Store: Send {
     fn pending_receipts(&self) -> Result<Vec<(EventId, String)>>;
     fn history(&self, offset: usize, limit: usize) -> Result<Vec<HistoryEntry>>;
     fn content(&self, id: i64) -> Result<Payload>;
+    /// Only this device's retained local copies, independent of outgoing sends.
+    fn local_history(&self, offset: usize, limit: usize) -> Result<(u64, Vec<HistorySummary>)>;
+    fn local_content(&self, event: EventId) -> Result<Payload>;
     fn clear(&mut self) -> Result<()>;
     fn prune(&mut self) -> Result<()>;
 }
 pub enum NetworkEvent {
+    PeerHintsPermission {
+        peer: DeviceId,
+        reply: SyncSender<Result<u64>>,
+    },
+    HistoryRevisionQuery {
+        peer: DeviceId,
+        reply: SyncSender<Result<(u64, u64)>>,
+    },
+    HistoryListQuery {
+        peer: DeviceId,
+        cursor: Option<HistoryCursor>,
+        limit: u16,
+        reply: SyncSender<Result<(u64, HistoryListResponse)>>,
+    },
+    HistoryGetQuery {
+        peer: DeviceId,
+        event: EventId,
+        reply: SyncSender<Result<(u64, Payload)>>,
+    },
     ReceiptQuery {
         peer: DeviceId,
         event: EventId,

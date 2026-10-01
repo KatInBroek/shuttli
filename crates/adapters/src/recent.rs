@@ -5,6 +5,7 @@ use chacha20poly1305::{
     XChaCha20Poly1305, XNonce,
     aead::{Aead, KeyInit, Payload as Aad},
 };
+use shuttli_model::mobile::HistorySummary;
 use shuttli_model::sync::*;
 use shuttli_ports::sync::{Payload, Result};
 use std::{
@@ -50,6 +51,7 @@ pub(crate) struct RecentHistory {
     secret: Zeroizing<[u8; 32]>,
     rows: VecDeque<Record>,
     next: i64,
+    revision: u64,
     cache_writable: bool,
 }
 impl RecentHistory {
@@ -81,6 +83,7 @@ impl RecentHistory {
             secret,
             rows: VecDeque::new(),
             next,
+            revision: 1,
             cache_writable: true,
         })
     }
@@ -106,9 +109,16 @@ impl RecentHistory {
         Ok(())
     }
     fn remove(&mut self, index: usize) -> Result<()> {
+        let local = self.rows[index].entry.direction == "local";
         Self::discard(&mut self.rows[index])?;
         self.rows.remove(index);
+        if local {
+            self.bump();
+        }
         Ok(())
+    }
+    fn bump(&mut self) {
+        self.revision = self.revision.wrapping_add(1).max(1);
     }
     pub fn record(
         &mut self,
@@ -210,15 +220,20 @@ impl RecentHistory {
             meta: p.meta.clone(),
             body,
         };
+        let local = row.entry.direction == "local";
         if let Some(index) = index {
             self.rows[index] = row;
         } else {
             self.rows.push_front(row);
         }
+        if local {
+            self.bump();
+        }
         self.prune(settings)?;
         Ok(id)
     }
     pub fn update(&mut self, event: EventId, peer: &str, state: DeliveryState, detail: &str) {
+        let mut changed = false;
         for row in &mut self.rows {
             if row.entry.event == event
                 && row.entry.peer == peer
@@ -226,7 +241,11 @@ impl RecentHistory {
             {
                 row.entry.state = state;
                 row.entry.detail = detail.into();
+                changed |= row.entry.direction == "local";
             }
+        }
+        if changed {
+            self.bump();
         }
     }
     pub fn history(&self, offset: usize, limit: usize) -> Vec<HistoryEntry> {
@@ -236,6 +255,30 @@ impl RecentHistory {
             .take(limit.min(100))
             .map(|r| r.entry.clone())
             .collect()
+    }
+    pub fn local_history(&self, offset: usize, limit: usize) -> (u64, Vec<HistorySummary>) {
+        let items = self
+            .rows
+            .iter()
+            .filter(|r| r.entry.direction == "local")
+            .skip(offset.min(10_000))
+            .take(limit.min(21))
+            .map(|r| HistorySummary {
+                event: r.entry.event,
+                metadata: r.meta.clone(),
+                copied_at_ms: r.entry.time.saturating_mul(1000),
+                body_available: r.entry.available && r.body.is_some(),
+            })
+            .collect();
+        (self.revision, items)
+    }
+    pub fn local_content(&self, event: EventId) -> Result<Payload> {
+        let row = self
+            .rows
+            .iter()
+            .find(|r| r.entry.direction == "local" && r.entry.event == event)
+            .ok_or("local history item expired or cleared")?;
+        self.content(row.entry.id)
     }
     pub fn content(&self, id: i64) -> Result<Payload> {
         let row = self
@@ -314,6 +357,11 @@ impl RecentHistory {
                 self.remove(index)?;
             } else {
                 if mode == HistoryMode::Status {
+                    if self.rows[index].entry.direction == "local"
+                        && self.rows[index].body.is_some()
+                    {
+                        self.bump();
+                    }
                     Self::discard(&mut self.rows[index])?;
                 }
                 index += 1;

@@ -107,7 +107,7 @@ struct Content: View {
                     Text("Device fingerprint").font(.headline)
                     Text(model.fingerprint).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                     Text(model.clipboard)
-                    Text("A successful delivery records system clipboard readback at that time. A later copy can replace it.").foregroundStyle(.secondary)
+                    Text("A confirmed delivery means the receiver accepted the content at that time. Later copies or history cleanup can replace it.").foregroundStyle(.secondary)
                 } else if tab == 1 {
                     Text("Allow outgoing sync separately for each device. Verify its full fingerprint.")
                     ForEach(model.peers) { peer in VStack(alignment: .leading, spacing: 8) {
@@ -148,6 +148,7 @@ struct Content: View {
                     }
                     Button("Clear history and image cache") { model.call(["history", "clear"]) { _ in model.previewText = nil; model.previewImage = nil; model.history() } }
                     HStack { Button("Enable start at login") { model.call(["autostart", "on"]) }; Button("Disable start at login") { model.call(["autostart", "off"]) }; Button("Check status") { model.call(["autostart", "status"]) } }
+                    Text("App version: \(ProductBrand.version)").foregroundStyle(.secondary).textSelection(.enabled)
                 }
             }.frame(maxWidth: .infinity, alignment: .leading) }
         }.padding(20).frame(minWidth: 760, minHeight: 540).onAppear { model.refresh() }

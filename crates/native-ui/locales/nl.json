@@ -102,6 +102,7 @@
   "notice.receiving_content": "inhoud wordt ontvangen",
   "result.autostart_off": "uitgeschakeld",
   "result.autostart_on": "ingeschakeld (bij grafisch aanmelden van deze gebruiker)",
+  "notice.reception_confirmed": "Ontvanger heeft ontvangst in de bestemming bevestigd",
   "notice.remote_verified": "Klembord op afstand gecontroleerd en ontvangstbevestiging opgeslagen",
   "ui.automatic": "Automatische synchronisatie",
   "ui.manual": "Handmatige modus · gebruik Nu verzenden",
@@ -151,5 +152,12 @@
   "status.discovered": "Ontdekte apparaten",
   "status.allowed_send": "↑ Verzenden toegestaan",
   "status.allowed_receive": "↓ Ontvangen toegestaan",
-  "status.permissions_hint": "Offline apparaten tellen mee. Een richting is alleen toegestaan als zowel de algemene schakelaar als de apparaatschakelaar aan staat. Dit zijn lokale rechten; overdracht hangt ook af van het andere apparaat."
+  "status.permissions_hint": "Offline apparaten tellen mee. Een richting is alleen toegestaan als zowel de algemene schakelaar als de apparaatschakelaar aan staat. Dit zijn lokale rechten; overdracht hangt ook af van het andere apparaat.",
+  "ui.app_version": "Appversie",
+  "devices.history_pull": "Ontvangt via de geschiedenis terwijl de app open is",
+  "result.history_pull": "Geen rechtstreekse overdracht gestart; toegestane apparaten halen de bewaarde geschiedenis op",
+  "notice.receiver_confirmed": "Het apparaat heeft de ontvangst bevestigd",
+  "notice.cancelled": "Klembordoverdracht geannuleerd",
+  "notice.superseded": "Klembordoverdracht vervangen door een nieuwere kopie",
+  "notice.unconfirmed": "Klembordoverdracht niet bevestigd"
 }

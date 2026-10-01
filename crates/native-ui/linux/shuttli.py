@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """On-demand native GTK presentation. All operations use the public control API."""
-from brand import NAME
+from brand import NAME, VERSION
 import base64
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -406,7 +406,10 @@ class Window(Gtk.ApplicationWindow):
                 state = self.t('devices.online' if peer['online'] else 'devices.offline')
                 title = peer['name'] + '   ·   ' + state
                 directions = self.t('status.directions', send=self.t('common.on' if policy['send'] else 'common.off'), receive=self.t('common.on' if policy['receive'] else 'common.off'))
-                self.row(box, title, peer['id'][:12] + ' · ' + directions, Gtk.Image.new_from_icon_name('go-next-symbolic'))
+                subtitle = peer['id'][:12] + ' · ' + directions
+                if not peer.get('capabilities', {}).get('accept_live_offer', True):
+                    subtitle += '\n' + self.t('devices.history_pull')
+                self.row(box, title, subtitle, Gtk.Image.new_from_icon_name('go-next-symbolic'))
                 button.connect('clicked', lambda _, peer=peer: self.open_device(peer))
                 group.append(button)
             self.label(self.content, self.t('devices.help'), 'muted')
@@ -662,6 +665,7 @@ class Window(Gtk.ApplicationWindow):
                     self.notice(str(error), True)
             language.connect('notify::selected', changed)
             self.row(group, self.t('locale.label'), self.t('locale.help'), language)
+            self.row(group, self.t('ui.app_version'), VERSION)
             self.label(self.content, NAME + ' · MIT License', 'muted')
         self.call({'command': 'settings'}, render)
 

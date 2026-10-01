@@ -1,12 +1,12 @@
 # Shared mobile SDK and desktop-assisted discovery
 
-Status: proposed, not implemented. The [mobile feature specification](feature-spec.md) owns product requirements. Track [shared SDK #50](https://github.com/KatInBroek/shuttli/issues/50), [iOS #51](https://github.com/KatInBroek/shuttli/issues/51) and [Android #52](https://github.com/KatInBroek/shuttli/issues/52).
+Status: implementation in progress; protocol, transport and device acceptance remain pending. The [mobile feature specification](feature-spec.md) owns product requirements. Track [shared SDK #50](https://github.com/KatInBroek/shuttli/issues/50), [iOS #51](https://github.com/KatInBroek/shuttli/issues/51) and [Android #52](https://github.com/KatInBroek/shuttli/issues/52).
 
 ## Scope
 
 The first mobile apps work while open: explicitly import and send the current clipboard, query currently permitted recent retained history from each source, preview it, and copy a selected item locally on request. Use the separately installed official Tailscale client. No QR code, manual address, application account, central clipboard server or Tailscale administrative token is required.
 
-A desktop discovers the phone through its Tailscale peer list and connects to the foreground app. Each desktop is an ordinary peer; none is a coordinator or trust broker. A fetched item does not automatically replace the phone's system clipboard. Mobile sending is manual; launching, resuming, discovering a device or enabling a direction never sends the phone's existing clipboard content. As phones are often offline, a foreground connection queries bounded recent local copies still held in each desktop's session history when current permissions allow. No desktop sends an unsolicited clipboard body to a pull-only peer.
+A desktop discovers the phone through its Tailscale peer list and connects to the foreground app. Each desktop is an ordinary peer; none is a coordinator or trust broker. A fetched item does not automatically replace the phone's system clipboard. Mobile sending is manual; launching, resuming, discovering a device or enabling a direction never sends the phone's existing clipboard content. As phones are often offline, a foreground connection queries bounded recent local copies still held in each desktop's session history when current permissions allow. Online permitted peers exchange live content using the original protocol on every platform. History queries additionally recover retained copies after absence.
 
 Background clipboard monitoring, lock-screen delivery, push notifications, share extensions, shortcuts, files, independent LAN discovery and phone-only initial discovery are outside this first mobile delivery.
 
@@ -17,22 +17,28 @@ Shared means the same Rust source compiled for each target through Cargo path de
 | Component | Reuse and required changes |
 | --- | --- |
 | model, core | Same source; separate permission to fetch a history body from permission to write the OS clipboard. Gate history export by authenticated identity and current send/type/history policy; preserve desktop invariants without an offline eligibility ledger. |
-| application, ports, api | Same use cases and contracts; add explicit import, draft, local copy, bounded history catch-up, negotiated capabilities and foreground lifecycle. |
-| runtime | Bounded serial scheduling with explicit start, pause and stop. |
-| protocol | Extract shared version dispatch, framing and receipt contracts. |
-| adapters-common | Extract TLS, normalization, identity, encryption and storage from desktop-specific adapters. |
-| desktop adapters | Keep Tailscale enumeration, X11, macOS helper, autostart and desktop notifications here. |
-| mobile-sdk | Composition root assembling application/runtime/common adapters and injected native services. |
+| application, ports, api | Desktop application and local control contracts. Mobile foreground/cache orchestration stays in the SDK; policy and event authority remain in the common core. |
+| runtime | Desktop bounded worker scheduling. Mobile transport uses a bounded foreground Tokio runtime owned by its lifecycle adapter. |
+| protocol | Common HELLO version dispatch and bounded live/history/roster value codecs. |
+| identity, content, transport | Shared TLS identity, canonical content validation, HELLO framing, live transfer mechanics and history response service. |
+| desktop adapters | Tailscale enumeration, X11, macOS helper, autostart, session storage and desktop notifications. |
+| mobile-sdk | Foreground lifecycle and bounded cache adapter, with the same SyncCore permission/publication/reception authority and shared wire services. |
 | mobile-ffi | Generated UniFFI boundary and Swift/Kotlin bindings. |
 | native apps | Independent SwiftUI and Compose UIs, clipboard/lifecycle adapters, packaging and real-device tests. |
 
-The existing desktop service captures a clipboard baseline and treats a successful `OFFER` as OS application. Leave that desktop path intact. A pull-only peer does not accept incoming `OFFER`; `HISTORY_GET` only places selected content in its bounded app cache, and its later local OS copy is a separate operation. The protocol needs no mobile device-type field or `Received` delivery receipt for this release.
+The transport shares framing, payload validation, permission rechecks and OFFER/READY/body/APPLIED mechanics through `crates/transport`. Its sender and receiver do not distinguish device kinds. A native reception adapter commits content before APPLIED: the desktop writes/readbacks its clipboard and keeps its existing durable receipt; the mobile app verifies and accepts a bounded history-cache item. The phone OS clipboard is touched only by explicit Copy. A mobile live receipt is session-scoped: clear/eviction/restart may make a subsequent STATUS query Unknown. HISTORY_GET remains a separate request that caches content without creating a live receipt or publishing an event.
 
-Proposed additions:
+Every endpoint that advertises history queries must serve both HISTORY_LIST and HISTORY_GET as well as consume replies. Desktop storage and the foreground app cache supply different snapshot adapters to the same history responder; both use the same core authorization rules and revocable policy revisions. Export only retained events created by the exporting identity in its current process session, never imported copies. The mobile process session epoch survives foreground listener restarts so resuming does not hide its own retained sends.
+
+Peer discovery is renewed before hint expiry. Directly authenticated endpoints remain retry candidates after a disconnect even if the original roster hint expires. Concurrent connections choose the same identity-ordered initiator preference; superseded routes cannot mark a replacement offline. Notices never acknowledge a transfer or consume a request turn.
+
+Workspace layout:
 
 ```text
 crates/protocol/
-crates/adapters-common/
+crates/identity/
+crates/content/
+crates/transport/
 crates/mobile-sdk/
 crates/mobile-ffi/
 apps/ios/                 # Xcode project, SwiftUI, platform adapters, tests
@@ -71,7 +77,7 @@ Do not access another app's private LocalAPI/container, scan the whole address s
 
 Reuse the existing bounded TLS transport, identity, session selection, framing and message loop. Negotiate `peer_hints`, `history_pull` and `accept_live_offer` as independent v2 operation capabilities; never add a `mobile` or OS-kind permission branch. After an authenticated session with `peer_hints` is selected and application policy is loaded, send one `PEER_LIST(revision, peers)` snapshot if effective sending to that peer is on. If permission becomes enabled during the session, send it then. Send coalesced replacement snapshots, including an empty one, when directly authenticated online peers join/leave or their verified endpoint/capability changes; resend on reconnect. Include only other peers from the sender's current authenticated sessions, never the sender, recipient, unverified tailnet entries or hint-only candidates. Recheck permission immediately before each write. Each device's receive permission controls its history requests; discovery remains usable. A disabled sender cannot retract a list already delivered, so the phone expires unverified hints after a short lifetime; directly authenticated peers keep their own identity and policy. No separate periodic peer-list poll is needed. Reject duplicates, self entries, non-Tailscale addresses, oversized lists and stale endpoints. The phone verifies the actual TLS peer identity before showing or querying any hinted device. Hints never authorize outgoing sending on the phone or on another desktop.
 
-Capability meaning is per operation: `peer_hints` permits receiving roster snapshots, `history_pull` supports authenticated history requests/responses, and `accept_live_offer` permits unsolicited clipboard `OFFER` delivery. A peer can advertise any valid combination. The session initiator, operating system and form factor do not determine policy. For this release the phone advertises `peer_hints` and `history_pull`, but not `accept_live_offer`; a desktop keeps live-offer acceptance and serves history when permitted. Both peers still apply their own per-device direction settings to each operation.
+Capability meaning is per operation: `peer_hints` permits receiving roster snapshots, `history_pull` supports authenticated history requests/responses, and `accept_live_offer` permits unsolicited clipboard `OFFER` delivery. A peer can advertise any valid combination. The session initiator, operating system and form factor do not determine policy. The foreground phone advertises live-offer acceptance as well as history and peer-hint operations. Native lifecycle and per-device policy determine which operations are currently allowed; device type does not. Both peers still apply their own per-device direction settings to each operation.
 
 Roster eligibility uses the sender's effective outgoing permission and the recipient's `peer_hints` capability. The phone's receive-from-source switch controls its history requests, not whether it can learn discovery hints. Peer snapshots are sent on connection or permission enablement, updated after direct authenticated-peer changes, and resent on reconnect; there is no elected roster owner or periodic full-network broadcast.
 
@@ -82,6 +88,7 @@ Roster eligibility uses the sender's effective outgoing permission and the recip
 | Operation | Completion meaning |
 | --- | --- |
 | Desktop clipboard | Applied only after conflict checks, OS write, independent OS readback and durable receipt. |
+| Mobile live reception | Validated content committed to the bounded app cache, followed by APPLIED; no OS clipboard write or durable offline delivery promise. |
 | History GET | Requested content was validated and cached in the requesting app; no delivery receipt or OS clipboard write is implied. |
 
 Copying a fetched item is a separate local operation with a fresh core write permit and current platform checks. It never automatically broadcasts on the phone. Explicit resend of a phone-origin item creates a new event and rechecks permissions. Local copy success/failure/unverified state does not turn a history query into an Applied receipt. A platform API accepting bytes is not independent readback; report uncertainty honestly.
@@ -92,7 +99,7 @@ Catch-up requires new Wire v2 requests; the existing desktop localhost history A
 
 At both list and content-fetch time, the source rechecks the authenticated requester identity, current effective outgoing permission, content-type policy, source origin and history mode. The phone checks its per-device incoming permission before either request; its UI has no global direction switch. A denied or revoked request yields no content. Once sending to the phone is allowed, it can request all currently retained local-origin copies permitted by the current type/history settings, including copies made before discovery/consent or while automatic sending was off. The automatic switch controls live publication, not an authorized history request. Explain this scope beside the source's device-send permission. Desktop history Off yields no catch-up records, and Status mode cannot supply bodies. No new archive is created.
 
-Define bounded `HISTORY_LIST(cursor, limit)` and `HISTORY_GET(event_id)` operations on each source's authenticated session, with per-source pagination and byte caps. The list returns metadata and availability, not clipboard bodies; `GET` must recheck policy and object identity immediately before sending. Status-only history cannot provide bodies. Never infer or fabricate a delivery receipt from a list/get response: show **Listed**, **Available in app** after verified body caching, then a separate local copy result only after the user's action. Repeated results for the same wire event ID merge into one row; content equality is not identity. Keep source, copy time, acquisition path, last refresh, availability and per-target outcomes separate. Show clock-skew uncertainty instead of promising exact order between devices.
+Define bounded `HISTORY_LIST(cursor, limit)` and `HISTORY_GET(event_id)` operations on each source's authenticated session, with per-source pagination and byte caps. The list returns metadata and availability, not clipboard bodies; `GET` must recheck policy and object identity immediately before sending. Status-only history cannot provide bodies. Never infer or fabricate a delivery receipt from a list/get response: show **Listed**, **Available in app** after verified body caching, then a separate local copy result only after the user's action. A later history list may report source-side expiry or status-only retention; that cannot recall content separately accepted by the live reception adapter. Local retention/clear still governs that cached item. Repeated results for the same wire event ID merge into one row; content equality is not identity. Keep source, copy time, acquisition path, last refresh, availability and per-target outcomes separate. Show clock-skew uncertainty instead of promising exact order between devices.
 
 Fetch metadata from each connected desktop on foreground entry and explicit refresh; fetch content within the phone's existing RAM/encrypted temporary-image quotas, on demand where necessary. While the phone stays open, a desktop sends a lightweight `HISTORY_CHANGED(revision)` hint when the retained window visible under that phone's current policy changes; a policy change that enables access also triggers a fresh list. Coalesce hints so rapid copies do not create unbounded work. The phone then fetches the changed bounded window and only new/needed bodies. A per-source cursor/revision avoids repeated full body transfers; after reconnect, missed revision, source epoch change or invalid cursor, reconcile that source's current bounded window. Do not rely on a notification as proof that content was received. Cancel on background entry and discard stale callbacks. An offline desktop, source restart, cleared/disabled history, retention eviction or network error can create a gap; show per-source stale/partial state. A successful list call proves only the current retained window was queried. Do not keep a background listener, add a central server or persist desktop text history to promise complete recovery.
 
@@ -110,14 +117,17 @@ Android clipboard image exports have an independent bounded OS-use lifetime, des
 
 ## Protocol and API compatibility
 
-Wire v1 has strict parsing and Applied semantics. Introduce explicit Wire v2 capability negotiation before the mobile UI:
+Wire v1 retains its original live messages and Poll/Idle ordering and works with desktop or mobile reception adapters. The current extension negotiates HELLO version 3 for live plus history operations; version 2 remains the earlier pull-only extension. The shared extension frame codec retains history operations and adds the original Poll/Idle/STATUS/Receipt operations. These versions describe protocol support, never device kind:
 
-- Upgraded desktops retain v1 interoperability; the pull-only phone flow requires v2 history and peer-hint capabilities.
+- In current live-plus-history sessions, public-key identity order assigns request turns. Only one operation owns the byte stream at a time; Poll/Idle grants the other peer a turn. History requests yield between bodies, and change notices cannot replace READY or APPLIED. Session initiation and OS do not assign the turn.
+- A newer connector tries the extension first. A fresh v1 retry is allowed only after authenticated HELLO incompatibility/closure, with the same certificate identity checked again. TLS or identity failures never trigger downgrade.
+
+- All clients retain v1 live interoperability. History and peer hints additionally require negotiated extension support.
 - Dispatch by version before strict parsing. Reject invalid lengths, fields and identity bindings.
-- Existing desktop-to-desktop fallback may use a fresh v1 connection only after an explicit version-incompatibility result, never after TLS/identity failure. The phone requires v2 for this release and reports older peers as unsupported.
+- Existing desktop-to-desktop fallback may use a fresh v1 connection only after an explicit version-incompatibility result, never after TLS/identity failure. A v1-only connection remains usable for live delivery and does not pretend to support history catch-up.
 - Version local IPC and FFI separately. Unknown receipt states cannot default to success.
-- Existing desktop Applied receipts and bounded sender-scoped STATUS queries remain unchanged; history queries never create a delivery receipt or reapply a clipboard.
-- Negotiate history-list/get, peer-list, history-change and live-offer acceptance independently within v2. A peer without `accept_live_offer` receives no unsolicited OFFER, and one without history capability cannot be queried. Unknown frames and older peers retain versioned behavior; a hint cannot create permission or bypass identity verification.
+- Existing desktop OS confirmation/durable receipt requirements and bounded sender-scoped STATUS queries remain unchanged; history queries never create a delivery receipt or reapply a clipboard.
+- Negotiate history-list/get, peer-list, history-change and live-offer acceptance independently. A peer without `accept_live_offer` receives no unsolicited OFFER, and one without history capability cannot be queried. Unknown frames and older peers retain versioned behavior; a hint cannot create permission or bypass identity verification.
 
 ## Independent tasks and gates
 
@@ -125,9 +135,9 @@ Wire v1 has strict parsing and Applied semantics. Introduce explicit Wire v2 cap
 | --- | --- |
 | M01 | Linux discovers real iOS and Android devices; authenticated bidirectional synthetic traffic, peer-list snapshot on connect/permission enable, coalesced join/leave updates, revocation, direct peer verification, cellular/resume and denied-policy cases. Verify actual listener routing. |
 | M02 | Minimal Swift/Kotlin calls into the same Rust code; thread/cancel/release tests, fixed toolchains/ABIs and review of generated unsafe boundaries. Public bindings cannot expose internal permits. |
-| M03 | Shared explicit import, local copy and pull-only history contracts across core, application, ports, API and Wire v2; capability routing, permissions, replay, no-forwarding and old-desktop behavior. Every core coverage metric remains above 95%. |
+| M03 | Shared explicit import, local copy and live-plus-history contracts across core, application, ports, API and Wire v2; capability routing, permissions, replay, no-forwarding and old-desktop behavior. Every core coverage metric remains above 95%. |
 | M04 | Extract common adapters without changing desktop behavior, then assemble a mobile SDK with explicit capabilities and lifecycle. No desktop dependency leaks into mobile. |
-| M05 | Desktop v1 regression, phone probing, no unsolicited OFFER to pull-only peers, disconnect results and policy handling, testable without mobile UI. |
+| M05 | Platform-neutral v1 regression with mobile and desktop receivers, phone probing, live plus history arbitration, explicit pull-only capability behavior, disconnect results and policy handling, testable without mobile UI. |
 | M06 | Traceable desktop/SDK/wire/mobile version matrix and independent release evidence for each platform. |
 | M07 | Authenticated history list/get and change hints over existing retained local history with current-policy rechecks; offline-phone catch-up, newly granted access to older retained copies, live increments, multi-source merge, no-forwarding, revoked consent, eviction and partial-history tests. |
 

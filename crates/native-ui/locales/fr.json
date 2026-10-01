@@ -102,6 +102,7 @@
   "notice.receiving_content": "réception du contenu",
   "result.autostart_off": "désactivé",
   "result.autostart_on": "activé (à la connexion graphique de cet utilisateur)",
+  "notice.reception_confirmed": "Le destinataire a confirmé la réception dans sa destination",
   "notice.remote_verified": "Presse-papiers distant vérifié et accusé de réception enregistré",
   "ui.automatic": "Synchronisation automatique",
   "ui.manual": "Mode manuel · utiliser Envoyer maintenant",
@@ -151,5 +152,12 @@
   "status.discovered": "Appareils découverts",
   "status.allowed_send": "↑ Envoi autorisé",
   "status.allowed_receive": "↓ Réception autorisée",
-  "status.permissions_hint": "Les appareils hors ligne sont inclus. Une direction est autorisée uniquement si son interrupteur global et celui de l’appareil sont activés. Ces autorisations sont locales ; le transfert dépend aussi de l’autre appareil."
+  "status.permissions_hint": "Les appareils hors ligne sont inclus. Une direction est autorisée uniquement si son interrupteur global et celui de l’appareil sont activés. Ces autorisations sont locales ; le transfert dépend aussi de l’autre appareil.",
+  "ui.app_version": "Version de l’application",
+  "devices.history_pull": "Reçoit via l’historique lorsque l’application est ouverte",
+  "result.history_pull": "Aucun transfert direct lancé ; les appareils autorisés récupèrent l’historique conservé",
+  "notice.receiver_confirmed": "L’appareil a confirmé la réception",
+  "notice.cancelled": "Transfert du presse-papiers annulé",
+  "notice.superseded": "Transfert remplacé par une copie plus récente",
+  "notice.unconfirmed": "Transfert du presse-papiers non confirmé"
 }

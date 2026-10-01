@@ -63,6 +63,19 @@ def main():
         bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         name = 'org.shuttli.Tray.profile_' + hashlib.sha256(path.encode()).hexdigest()[:16]
         interface = 'com.canonical.dbusmenu'
+        registrations = []
+        watcher_xml = '''<node><interface name="org.kde.StatusNotifierWatcher">
+          <method name="RegisterStatusNotifierItem"><arg type="s" direction="in"/></method>
+        </interface></node>'''
+
+        def register(_bus, sender, _path, _interface, _method, args, invocation):
+            registrations.append((sender, args.unpack()[0]))
+            invocation.return_value(GLib.Variant('()', ()))
+
+        watcher_object = bus.register_object('/StatusNotifierWatcher',
+            Gio.DBusNodeInfo.new_for_xml(watcher_xml).interfaces[0], register, None, None)
+        watcher_owner = Gio.bus_own_name_on_connection(bus, 'org.kde.StatusNotifierWatcher',
+            Gio.BusNameOwnerFlags.NONE, None, None)
 
         def call(method, signature, args):
             return bus.call_sync(name, '/Menu', interface, method, GLib.Variant(signature, args),
@@ -105,6 +118,8 @@ def main():
                                             Gio.DBusSignalFlags.NONE, signal)
         try:
             wait(ready)
+            wait(lambda: len(registrations) == 1)
+            assert registrations[0][0] == registrations[0][1], 'register the actual bus owner'
             cache.update(properties())
             for send, receive in [(False, True), (True, False), (False, False), (True, True)]:
                 state.update(send=send, receive=receive)
@@ -145,7 +160,17 @@ def main():
             call('Event', '(isvu)', (40, 'clicked', GLib.Variant('i', 0), 0))
             wait(lambda: quit_requested.is_set() and child.poll() == 0)
             print('PASS localized Quit menu invokes the lifecycle API and exits the tray', flush=True)
+            child = subprocess.Popen([sys.executable, str(ROOT / 'crates/native-ui/linux/tray.py'),
+                                      path, '/bin/true', str(os.getpid())],
+                                     env={**os.environ, 'LANG': 'C.UTF-8'})
+            wait(lambda: len(registrations) == 2)
+            assert registrations[1][0] == registrations[1][1], 'restart must register its actual bus owner'
+            assert registrations[0][1] != registrations[1][1], 'panel must see a new registration after restart'
+            wait(ready)
+            print('PASS same-profile tray restart registers a distinct live bus owner', flush=True)
         finally:
+            Gio.bus_unown_name(watcher_owner)
+            bus.unregister_object(watcher_object)
             bus.signal_unsubscribe(subscription)
             child.terminate()
             child.wait(timeout=5)

@@ -284,7 +284,7 @@ fn parse(a: &[&str], api: &mut impl ControlApi) -> Result<Option<Action>, String
         _ => return Err("Unsupported command; use --help".into()),
     }))
 }
-pub const HELP: &str = "Usage: shuttli daemon | ui | status | devices | refresh | send | quit\n  settings | set <send|receive|automatic|text|images|notifications> <on|off>\n  set history <off|status|content>\n  set history-limit <0..10000>\n  set history-memory-mib <0..64> | set history-image-mib <0..1024>\n  peer <full fingerprint> <send|receive|text|images|quiet> <on|off>\n  history [preview|copy|resend <id>] | history clear\n  history copy <id> --local-only\n  autostart <status|on|off>\nAppend --json for the versioned local API response.\n";
+pub const HELP: &str = "Usage: shuttli --version | daemon | ui | status | devices | refresh | send | quit\n  settings | set <send|receive|automatic|text|images|notifications> <on|off>\n  set history <off|status|content>\n  set history-limit <0..10000>\n  set history-memory-mib <0..64> | set history-image-mib <0..1024>\n  peer <full fingerprint> <send|receive|text|images|quiet> <on|off>\n  history [preview|copy|resend <id>] | history clear\n  history copy <id> --local-only\n  autostart <status|on|off>\nAppend --json for the versioned local API response.\n";
 
 #[cfg(test)]
 mod tests {

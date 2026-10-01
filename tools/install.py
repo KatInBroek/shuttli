@@ -36,9 +36,10 @@ if sys.platform == 'darwin':
     executable = macos/'shuttli'
     shutil.copy2(target, executable)
     executable.chmod(0o755)
+    version = subprocess.check_output([str(binary), '--version'], encoding='utf-8').strip().rsplit(' ', 1)[-1]
     info = dict(CFBundleName=product_name, CFBundleDisplayName=product_name, CFBundleIdentifier='org.shuttli.app',
-                CFBundleExecutable='shuttli', CFBundlePackageType='APPL', CFBundleVersion='0.1.1',
-                CFBundleShortVersionString='0.1.1', LSUIElement=True,
+                CFBundleExecutable='shuttli', CFBundlePackageType='APPL', CFBundleVersion=version,
+                CFBundleShortVersionString=version, LSUIElement=True,
                 NSHighResolutionCapable=True, NSLocalNetworkUsageDescription='Discover and synchronize clipboards with devices you allow.')
     (bundle/'Contents/Info.plist').write_bytes(plistlib.dumps(info))
     # Local development signature; this is not Developer ID signing/notarization.

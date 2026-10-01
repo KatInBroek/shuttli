@@ -1,6 +1,6 @@
 # iOS foreground app specification
 
-Status: proposed; not implemented or device-validated. The [mobile feature specification](feature-spec.md) owns product requirements. [Issue #51](https://github.com/KatInBroek/shuttli/issues/51). Prerequisite: [shared SDK](shared-sdk.md); the temporary-Mac workflow is in the [development and test plan](ios-development-plan.md). Android has its [own specification](android.md).
+Status: implementation in progress; build, network flow and real-device acceptance remain pending. The [mobile feature specification](feature-spec.md) owns product requirements. [Issue #51](https://github.com/KatInBroek/shuttli/issues/51). Prerequisite: [shared SDK](shared-sdk.md); the temporary-Mac workflow is in the [development and test plan](ios-development-plan.md). Android has its [own specification](android.md).
 
 ## Scope and platform
 
@@ -30,7 +30,7 @@ The UI must show **Updating**, **Last checked at**, **Some devices unavailable**
 
 An upgraded desktop obtains the phone address from Tailscale and connects to its foreground listener on the application port. Reuse the existing TLS identity and per-device send-consent flow. A newly connected computer is visible after authentication, but sends no roster or history until its own send-to-phone permission is enabled. Every directly connected computer with `peer_hints` capability and effective permission to send to the phone then shares its own bounded snapshot of directly authenticated Shuttli peers. The phone merges snapshots by public-key identity, tracks each hint's source and expiry, then contacts each suggested computer directly or reuses its own session with it. That computer independently authenticates the phone and decides whether it may send history. A hint is never a trust or permission grant, and a computer never relays a hint-only peer. Display a device only after TLS/application authentication. Name/address changes preserve policy; key changes create a new device. Receiving from new peers defaults on, sending to new peers defaults off. Offer full-fingerprint comparison before allowing each outgoing direction; no bidirectional pairing ceremony is required. Explain that allowing send also grants access to currently retained local history, including copies made before this permission was granted.
 
-Explain that fetched content enters the app and does not automatically overwrite the OS clipboard. Desktop-assisted discovery targets 40 seconds on a healthy network; phone refresh does not force unknown desktops to rescan. Diagnose disabled per-device receiving accurately without assuming an empty list means Tailscale is logged out. After each authenticated computer connection, query bounded history when that computer is allowed to send and the phone permits receiving from it. Computers send lightweight history-change hints, never unsolicited clipboard bodies to a peer without `accept_live_offer`. Each permitted computer sends a peer snapshot on connection or permission enablement and updates it as its verified online peers change. Unverified hints expire and are never displayed as trusted devices.
+Explain that fetched content enters the app and does not automatically overwrite the OS clipboard. Desktop-assisted discovery targets 40 seconds on a healthy network; phone refresh does not force unknown desktops to rescan. Diagnose disabled per-device receiving accurately without assuming an empty list means Tailscale is logged out. After each authenticated computer connection, query bounded history when that computer is allowed to send and the phone permits receiving from it. Online permitted peers deliver live content into the app cache using the original protocol. History-change hints and queries additionally recover retained copies; only explicit Copy writes the phone clipboard. A v1-only peer remains usable for live synchronization without history catch-up. Each permitted computer sends a peer snapshot on connection or permission enablement and updates it as its verified online peers change. Unverified hints expire and are never displayed as trusted devices.
 
 ## Explicit import and send
 
@@ -62,13 +62,37 @@ History defaults to 20 merged events (0-10,000, subject to quotas); modes Off/St
 
 ## UI and lifecycle
 
-Provide Home, History, Devices and Settings using native navigation and the shared logo. Support system language plus English, Dutch, German and French; VoiceOver, dynamic type, light/dark themes and long names. States must not depend only on color.
+Provide Home (merged history), Devices and Settings using native navigation and the shared logo. Support system language plus English, Dutch, German and French; VoiceOver, dynamic type, light/dark themes and long names. States must not depend only on color.
 
 Only active state admits new content operations; background entry closes listeners and network tasks. Temporary inactivity, such as a system paste prompt, must not erase the entire session history. Discard late callbacks using session IDs. Lock, termination, network changes and resume never replay a draft. Interrupted transfers become cancelled/failed/unknown according to actual evidence; completed receipts retain their historical meaning.
 
 Use in-app hints by default; system notification permission is not required. Never include bodies or thumbnails in system notifications. No background keep-alive, autostart or notification-permission loop. Protect sandbox identity/policy files and exclude them from backups/logs; cache encryption uses a memory-only session key. Uninstall or lost identity creates a new peer, never inherited send consent. Validate actual Tailscale interface restrictions on a real device.
 
 Design waiting/discovery, identity/consent, paste preview, per-target progress, unified history, source freshness, local copy outcome, settings and failure screens. Differentiate Listed, Available in app, local copy result, desktop Applied for phone-origin sends, unknown, cancelled, superseded, missing content and persistence/cleanup failure. Unknown diagnostics must remain unknown. Coordinate assets through [desktop design #49](https://github.com/KatInBroek/shuttli/issues/49).
+
+## Building and installing a personal test build
+
+On a Mac with Xcode, run `bash tools/mobile/install_xcodegen.sh`, then
+`bash tools/mobile/build_ios.sh`. This builds the simulator app and an unsigned
+arm64 device package at `target/mobile-ios/shuttli-device-unsigned.ipa`, with a
+commit and checksum manifest alongside it. CI publishes the same files as the
+`ios-device-package` artifact. The packaging gate verifies the device platform,
+architecture and archive contents. A simulator app cannot be installed on an
+iPhone.
+
+The IPA must be signed for the intended device before installation. For personal
+testing, Xcode can use a free Apple Account's Personal Team. With a Linux host,
+a third-party signing and installation tool such as
+[iloader](https://github.com/nab138/iloader) can import the IPA and sign it using
+the user's account. Connect the unlocked phone by USB, approve the computer's
+Trust prompt, and follow the on-device developer trust and Developer Mode steps.
+Enter account credentials only in the local signing tool; they are never needed
+by the build pipeline. Unsigned CI packages are not TestFlight or App Store
+releases, and successful packaging does not establish physical-device acceptance.
+
+Free Personal Team provisioning expires after seven days, requiring another
+signing/install cycle. See Apple's
+[account limitations](https://developer.apple.com/help/account/basics/about-your-developer-account).
 
 ## Independent tasks
 

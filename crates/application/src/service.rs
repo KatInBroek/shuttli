@@ -2,6 +2,7 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use shuttli_api::control::*;
 use shuttli_core::sync::SyncCore;
+use shuttli_model::mobile::{HistoryCursor, HistoryListRequest, HistoryListResponse};
 use shuttli_model::sync::*;
 use shuttli_ports::{sync::*, worker::Port};
 use std::{
@@ -29,6 +30,8 @@ pub struct Service {
     store: Port<dyn Store>,
     platform: Port<dyn Platform>,
     device: String,
+    id: DeviceId,
+    epoch: [u8; 16],
     description: String,
     busy: Cell<bool>,
     stopping: Cell<bool>,
@@ -86,6 +89,8 @@ impl Service {
             store,
             platform,
             device: format_id(id),
+            id,
+            epoch,
             description,
             busy: Cell::new(false),
             stopping: Cell::new(false),
@@ -169,7 +174,12 @@ impl Service {
                                 }
                             }
                             if let Err(e) = self
-                                .publish(observation.publications, p, "automatic observation")
+                                .publish(
+                                    observation.publications,
+                                    p,
+                                    "automatic observation",
+                                    false,
+                                )
                                 .await
                             {
                                 self.state.borrow_mut().last_error = Some(e);
@@ -198,14 +208,43 @@ impl Service {
         permits: Vec<shuttli_core::sync::Publication>,
         payload: Payload,
         reason: &str,
+        record_local: bool,
     ) -> Result<usize> {
         let mut count = 0;
+        if record_local {
+            if let Some(permit) = permits.first() {
+                let event = permit.event();
+                let peer = self.device.clone();
+                let p = payload.clone();
+                let id = self
+                    .store
+                    .call(move |s| {
+                        s.record(
+                            event,
+                            &peer,
+                            "local",
+                            DeliveryState::Applied,
+                            &p,
+                            "Local clipboard copy",
+                        )
+                    })
+                    .await?;
+                if id != 0 {
+                    self.state.borrow_mut().sequence += 1;
+                }
+            }
+        }
         for permit in permits {
+            if !self.state.borrow().peers.iter().any(|p| {
+                p.id == format_id(permit.target()) && p.online && p.capabilities.accept_live_offer
+            }) {
+                continue;
+            }
             let event = permit.event();
             let target = format_id(permit.target());
             let peer = target.clone();
             let p = payload.clone();
-            let detail = format!("{reason}; awaiting remote OS readback");
+            let detail = format!("{reason}; awaiting receiver confirmation");
             self.store
                 .call(move |s| s.record(event, &peer, "send", DeliveryState::Sending, &p, &detail))
                 .await?;
@@ -237,6 +276,45 @@ impl Service {
     }
     async fn network_event(&self, event: NetworkEvent) -> Result<()> {
         match event {
+            NetworkEvent::PeerHintsPermission { peer, reply } => {
+                let result = self
+                    .state
+                    .borrow()
+                    .core
+                    .authorize_peer_hints(peer)
+                    .map(|_| self.state.borrow().core.revision())
+                    .map_err(|e| format!("{e:?}"));
+                let _ = reply.send(result);
+            }
+            NetworkEvent::HistoryRevisionQuery { peer, reply } => {
+                let result = async {
+                    self.state
+                        .borrow()
+                        .core
+                        .authorize_peer_hints(peer)
+                        .map_err(|e| format!("{e:?}"))?;
+                    let (history_revision, _) = self.store.call(|s| s.local_history(0, 0)).await?;
+                    let state = self.state.borrow();
+                    state
+                        .core
+                        .authorize_peer_hints(peer)
+                        .map_err(|e| format!("{e:?}"))?;
+                    Ok((state.core.revision(), history_revision))
+                }
+                .await;
+                let _ = reply.send(result);
+            }
+            NetworkEvent::HistoryListQuery {
+                peer,
+                cursor,
+                limit,
+                reply,
+            } => {
+                let _ = reply.send(self.history_list_for(peer, cursor, limit).await);
+            }
+            NetworkEvent::HistoryGetQuery { peer, event, reply } => {
+                let _ = reply.send(self.history_body_for(peer, event).await);
+            }
             NetworkEvent::ReceiptQuery { peer, event, reply } => {
                 let result = if peer == event.origin {
                     self.store.call(move |s| s.receipt(event)).await
@@ -419,10 +497,15 @@ impl Service {
                     .await?;
                 self.state.borrow_mut().sequence += 1;
                 self.notify(
-                    if state == DeliveryState::Applied {
-                        "Clipboard sent"
-                    } else {
-                        "Clipboard transfer failed"
+                    match state {
+                        DeliveryState::Applied if event.origin == self.id => "Clipboard sent",
+                        DeliveryState::Applied => "Clipboard received",
+                        DeliveryState::Sending => "Sending clipboard",
+                        DeliveryState::Receiving => "Receiving clipboard",
+                        DeliveryState::Failed => "Clipboard transfer failed",
+                        DeliveryState::Cancelled => "Clipboard transfer cancelled",
+                        DeliveryState::Superseded => "Clipboard transfer replaced by a newer copy",
+                        DeliveryState::Unknown => "Clipboard transfer not confirmed",
                     },
                     &detail,
                     Some(&peer),
@@ -446,6 +529,104 @@ impl Service {
                 Ok(())
             }));
         }
+    }
+    async fn history_list_for(
+        &self,
+        requester: DeviceId,
+        cursor: Option<HistoryCursor>,
+        limit: u16,
+    ) -> Result<(u64, HistoryListResponse)> {
+        if !(HistoryListRequest { cursor, limit }).valid() {
+            return Err("invalid history page request".into());
+        }
+        self.state
+            .borrow()
+            .core
+            .authorize_peer_hints(requester)
+            .map_err(|e| format!("{e:?}"))?;
+        let offset = cursor.map_or(0, |c| c.offset as usize);
+        if offset > 10_000 || cursor.is_some_and(|c| c.source_epoch != self.epoch) {
+            return Err("stale history cursor".into());
+        }
+        let (revision, mut rows) = self
+            .store
+            .call(move |s| s.local_history(offset, limit as usize + 1))
+            .await?;
+        if cursor.is_some_and(|c| c.revision != revision) {
+            return Err("stale history cursor".into());
+        }
+        let has_next = rows.len() > limit as usize;
+        rows.truncate(limit as usize);
+        let state = self.state.borrow();
+        state
+            .core
+            .authorize_peer_hints(requester)
+            .map_err(|e| format!("{e:?}"))?;
+        rows.retain_mut(|row| {
+            if row.event.origin != self.id || row.event.epoch != self.epoch {
+                return false;
+            }
+            if state
+                .core
+                .authorize_history_export(requester, row.event, &row.metadata, false)
+                .is_err()
+            {
+                return false;
+            }
+            row.body_available &= state
+                .core
+                .authorize_history_export(requester, row.event, &row.metadata, true)
+                .is_ok();
+            if !row.body_available {
+                // A status-only item must not expose a guessable content hash.
+                row.metadata.digest = [0; 32];
+            }
+            true
+        });
+        let next = if has_next {
+            let next_offset = offset
+                .checked_add(limit as usize)
+                .ok_or("history cursor overflow")?;
+            Some(HistoryCursor {
+                source_epoch: self.epoch,
+                revision,
+                offset: next_offset
+                    .try_into()
+                    .map_err(|_| "history cursor overflow")?,
+            })
+        } else {
+            None
+        };
+        Ok((
+            state.core.revision(),
+            HistoryListResponse {
+                source_epoch: self.epoch,
+                revision,
+                items: rows,
+                next,
+            },
+        ))
+    }
+    async fn history_body_for(
+        &self,
+        requester: DeviceId,
+        event: EventId,
+    ) -> Result<(u64, Payload)> {
+        if event.origin != self.id || event.epoch != self.epoch || event.seq == 0 {
+            return Err("history event is not local to this session".into());
+        }
+        self.state
+            .borrow()
+            .core
+            .authorize_peer_hints(requester)
+            .map_err(|e| format!("{e:?}"))?;
+        let payload = self.store.call(move |s| s.local_content(event)).await?;
+        let state = self.state.borrow();
+        state
+            .core
+            .authorize_history_export(requester, event, &payload.meta, true)
+            .map_err(|e| format!("{e:?}"))?;
+        Ok((state.core.revision(), payload))
     }
     async fn configure(&self, settings: Settings) -> Result<Answer> {
         if !settings.validate() {
@@ -633,8 +814,16 @@ impl Service {
                     .core
                     .manual(v.stamp, &p.meta)
                     .map_err(|e| format!("{e:?}"))?;
-                let n = self.publish(permits, p, "explicit user command").await?;
-                done(&format!("Queued for {n} allowed device(s)"))
+                let n = self
+                    .publish(permits, p, "explicit user command", true)
+                    .await?;
+                if n == 0 {
+                    done(
+                        "No live clipboard transfer queued; permitted devices retrieve retained history",
+                    )
+                } else {
+                    done(&format!("Queued for {n} allowed device(s)"))
+                }
             }
             Action::History { offset, limit } => Answer::History {
                 entries: self
@@ -681,7 +870,8 @@ impl Service {
                         .core
                         .manual(written.stamp, &p.meta)
                         .map_err(|e| format!("{e:?}"))?;
-                    self.publish(permits, p, "explicit user command").await?;
+                    self.publish(permits, p, "explicit user command", true)
+                        .await?;
                 }
                 done("Copied history content to the system clipboard")
             }
@@ -699,8 +889,16 @@ impl Service {
                     .core
                     .manual(stamp, &p.meta)
                     .map_err(|e| format!("{e:?}"))?;
-                let n = self.publish(permits, p, "explicit user command").await?;
-                done(&format!("History queued as a new event for {n} device(s)"))
+                let n = self
+                    .publish(permits, p, "explicit user command", true)
+                    .await?;
+                if n == 0 {
+                    done(
+                        "No live clipboard transfer queued; permitted devices retrieve retained history",
+                    )
+                } else {
+                    done(&format!("History queued as a new event for {n} device(s)"))
+                }
             }
             Action::ClearHistory => {
                 self.store.call(|s| s.clear()).await?;

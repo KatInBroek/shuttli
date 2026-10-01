@@ -106,7 +106,7 @@ def run():
                                dict(id='03'*32, name='build-server-eu-west-ci-runner-03', address='100.64.0.3', online=False)]
         window.entries = [dict(id=i, event=dict(origin=[1]*32, epoch=[2]*16, seq=1 if i<3 else 2), peer=('02' if i!=2 else '03')*32,
                 direction='send' if i<3 else 'receive', state='unknown' if i==2 else 'applied', format='text', bytes=39,
-                time=1790520000+i, available=True, detail='remote OS readback and durable receipt completed' if i!=2 else 'Receipt unconfirmed') for i in (1,2,3)]
+                time=1790520000+i, available=True, detail='receiver confirmed its reception target' if i!=2 else 'Receipt unconfirmed') for i in (1,2,3)]
         Fixture.__init__(window, app, str(Path(directory)/'control.sock'))
         window.present()
         def wait_for(predicate):

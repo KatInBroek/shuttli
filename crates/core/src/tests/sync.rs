@@ -1,5 +1,72 @@
 use super::*;
 
+#[test]
+fn history_and_roster_require_current_outgoing_consent() {
+    let mut e = engine();
+    let local = EventId {
+        origin: [1; 32],
+        epoch: [2; 16],
+        seq: 7,
+    };
+    assert_eq!(e.authorize_peer_hints([3; 32]), Ok(()));
+    assert_eq!(
+        e.authorize_history_export([3; 32], local, &meta(1), true),
+        Ok(())
+    );
+    assert_eq!(e.authorize_peer_hints([9; 32]), Err(Rejection::Invalid));
+    assert_eq!(e.authorize_peer_hints([1; 32]), Err(Rejection::Invalid));
+    assert_eq!(
+        e.authorize_history_export([3; 32], incoming([3; 32]), &meta(1), false),
+        Err(Rejection::Invalid)
+    );
+    assert_eq!(
+        e.authorize_history_export([3; 32], EventId { seq: 0, ..local }, &meta(1), false),
+        Err(Rejection::Invalid)
+    );
+
+    let mut settings = e.settings().clone();
+    settings.automatic = false;
+    e.configure(settings.clone()).unwrap();
+    assert_eq!(
+        e.authorize_history_export([3; 32], local, &meta(1), true),
+        Ok(())
+    );
+
+    settings.peers.get_mut("B").unwrap().history = Some(HistoryMode::Status);
+    e.configure(settings.clone()).unwrap();
+    assert_eq!(
+        e.authorize_history_export([3; 32], local, &meta(1), false),
+        Ok(())
+    );
+    assert_eq!(
+        e.authorize_history_export([3; 32], local, &meta(1), true),
+        Err(Rejection::Disabled)
+    );
+
+    settings.history = HistoryMode::Off;
+    e.configure(settings.clone()).unwrap();
+    assert_eq!(
+        e.authorize_history_export([3; 32], local, &meta(1), false),
+        Err(Rejection::Disabled)
+    );
+    settings.history = HistoryMode::Content;
+    settings.peers.get_mut("B").unwrap().history = None;
+    settings.peers.get_mut("B").unwrap().send = false;
+    e.configure(settings.clone()).unwrap();
+    assert_eq!(e.authorize_peer_hints([3; 32]), Err(Rejection::Disabled));
+    settings.peers.get_mut("B").unwrap().send = true;
+    settings.text = false;
+    e.configure(settings.clone()).unwrap();
+    assert_eq!(
+        e.authorize_history_export([3; 32], local, &meta(1), false),
+        Err(Rejection::Disabled)
+    );
+    settings.text = true;
+    settings.send = false;
+    e.configure(settings).unwrap();
+    assert_eq!(e.authorize_peer_hints([3; 32]), Err(Rejection::Disabled));
+}
+
 fn incoming(peer: DeviceId) -> EventId {
     EventId {
         origin: peer,

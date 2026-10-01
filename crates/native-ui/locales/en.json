@@ -102,6 +102,7 @@
   "notice.receiving_content": "receiving content",
   "result.autostart_off": "disabled",
   "result.autostart_on": "enabled (current user's graphical login)",
+  "notice.reception_confirmed": "receiver confirmed its reception target",
   "notice.remote_verified": "remote OS readback and durable receipt completed",
   "ui.automatic": "Automatic sync",
   "ui.manual": "Manual mode · use Send now",
@@ -151,5 +152,12 @@
   "status.discovered": "Discovered devices",
   "status.allowed_send": "↑ Allowed to send",
   "status.allowed_receive": "↓ Allowed to receive",
-  "status.permissions_hint": "Counts include offline devices. A direction is allowed only when both its global switch and device switch are on. These are local permissions; delivery also depends on the other device."
+  "status.permissions_hint": "Counts include offline devices. A direction is allowed only when both its global switch and device switch are on. These are local permissions; delivery also depends on the other device.",
+  "ui.app_version": "App version",
+  "devices.history_pull": "Receives through history while the app is open",
+  "result.history_pull": "No live clipboard transfer queued; permitted devices retrieve retained history",
+  "notice.receiver_confirmed": "receiver confirmed its reception target",
+  "notice.cancelled": "Clipboard transfer cancelled",
+  "notice.superseded": "Clipboard transfer replaced by a newer copy",
+  "notice.unconfirmed": "Clipboard transfer not confirmed"
 }

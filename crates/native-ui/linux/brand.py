@@ -1,5 +1,6 @@
 """Display identity from the single source, or the running host's extracted copy."""
 from pathlib import Path
+import tomllib
 
 
 def load_name(path):
@@ -12,3 +13,6 @@ def load_name(path):
 base = Path(__file__).resolve().parent
 NAME = load_name(base / 'product-name.txt' if (base / 'product-name.txt').is_file()
                  else base.parents[2] / 'branding/name.txt')
+VERSION = ((base / 'product-version.txt').read_text(encoding='utf-8').strip()
+           if (base / 'product-version.txt').is_file()
+           else tomllib.loads((base.parents[2] / 'Cargo.toml').read_text(encoding='utf-8'))['workspace']['package']['version'])

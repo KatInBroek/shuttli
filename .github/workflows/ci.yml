@@ -5,6 +5,108 @@ on:
 permissions:
   contents: read
 jobs:
+  android-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+      - name: Install Android toolchain
+        run: |
+          sdkmanager --install 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.0.12077973'
+          rustup toolchain install stable --profile minimal
+      - name: Build Android libraries, Kotlin bindings, tests and packages
+        run: bash tools/mobile/build_android.sh
+      - name: Build Android emulator tests
+        run: cd apps/android && ./gradlew --no-daemon assembleDebugAndroidTest
+      - name: Upload Android build artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-packages
+          path: |
+            apps/android/app/build/outputs/apk/debug/app-debug.apk
+            apps/android/app/build/outputs/apk/release/app-release-unsigned.apk
+            apps/android/app/build/outputs/bundle/release/app-release.aab
+            apps/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            target/mobile-android/manifest.json
+            apps/android/app/build/tmp/kotlin-classes/debug/org/
+            apps/android/app/build/outputs/unit_test_code_coverage/
+          if-no-files-found: error
+  android-emulator:
+    needs: android-package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android-packages
+          path: .
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Verify Android app and cross-app image clipboard
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          emulator-options: -no-snapshot-load -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: bash tools/mobile/verify_android_emulator.sh
+      - name: Report Android application coverage
+        run: cd apps/android && ./gradlew --no-daemon :app:mobileCoverageReport
+      - name: Upload Android coverage
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-coverage
+          path: |
+            apps/android/app/build/reports/jacoco/mobileCoverageReport/
+            apps/android/app/build/outputs/code_coverage/
+          if-no-files-found: error
+  ios-simulator:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - name: Record Apple toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          rustc --version
+      - name: Install pinned XcodeGen
+        run: bash tools/mobile/install_xcodegen.sh
+      - name: Build iOS simulator app and unsigned device IPA
+        run: bash tools/mobile/build_ios.sh
+      - name: Upload unsigned iOS device package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ios-device-package
+          path: |
+            target/mobile-ios/shuttli-device-unsigned.ipa
+            target/mobile-ios/manifest.json
+          if-no-files-found: error
+      - name: Test iOS app state and native navigation
+        run: bash tools/mobile/verify_ios_simulator.sh
+      - name: Upload iOS tests and coverage
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ios-tests
+          path: |
+            target/ios-tests.xcresult
+            target/ios-coverage.json
+          if-no-files-found: error
   contracts:
     strategy:
       fail-fast: false
@@ -45,6 +147,8 @@ jobs:
           cargo +stable install cargo-llvm-cov --version 0.9.1 --locked
       - name: Measure core production code
         run: cargo +stable llvm-cov -p shuttli-core --locked --json --output-path target/core-coverage.json
+      - name: Report shared mobile SDK and native boundary coverage
+        run: cargo +stable llvm-cov -p shuttli-mobile-sdk -p shuttli-mobile-ffi -p shuttli-transport --locked --ignore-filename-regex "((mobile-sdk|mobile-ffi)/src/tests/|transport/src/tests.rs)" --json --output-path target/mobile-coverage.json
       - name: Require strictly greater than 95 percent coverage
         run: python3 tools/check_core_coverage.py target/core-coverage.json --summary-output target/core-coverage-summary.json
       - name: Save coverage evidence
@@ -52,7 +156,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: core-coverage
-          path: target/core-coverage*.json
+          path: |
+            target/core-coverage*.json
+            target/mobile-coverage.json
           if-no-files-found: error
 
   linux-ui:

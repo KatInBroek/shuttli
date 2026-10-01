@@ -1,10 +1,11 @@
 use super::service::Service;
 use shuttli_api::control::*;
 use shuttli_core::sync::{Publication, WriteAuthorization};
+use shuttli_model::mobile::HistorySummary;
 use shuttli_model::sync::*;
 use shuttli_ports::sync::*;
 use shuttli_runtime::{block_on, worker};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex, mpsc};
 fn payload(n: u8) -> Payload {
     Payload {
@@ -97,6 +98,7 @@ struct MemoryStore {
     fail: Arc<Mutex<bool>>,
     intent: bool,
     rows: Arc<Mutex<Vec<HistoryEntry>>>,
+    payloads: Arc<Mutex<BTreeMap<EventId, Payload>>>,
 }
 impl Store for MemoryStore {
     fn settings(&self) -> Result<Settings> {
@@ -117,12 +119,14 @@ impl Store for MemoryStore {
                 name: "B".into(),
                 address: "test".into(),
                 online: true,
+                capabilities: shuttli_model::mobile::Capabilities::legacy_desktop(),
             },
             PeerInfo {
                 id: "03".repeat(32),
                 name: "C".into(),
                 address: "test".into(),
                 online: true,
+                capabilities: shuttli_model::mobile::Capabilities::legacy_desktop(),
             },
         ])
     }
@@ -165,6 +169,7 @@ impl Store for MemoryStore {
             available: true,
             detail: detail.into(),
         });
+        self.payloads.lock().unwrap().insert(event, p.clone());
         Ok(id)
     }
     fn update(&mut self, _: EventId, _: &str, _: DeliveryState, _: &str) -> Result<()> {
@@ -179,6 +184,41 @@ impl Store for MemoryStore {
     fn content(&self, _: i64) -> Result<Payload> {
         Ok(payload(7))
     }
+    fn local_history(&self, offset: usize, limit: usize) -> Result<(u64, Vec<HistorySummary>)> {
+        let rows = self.rows.lock().unwrap();
+        let payloads = self.payloads.lock().unwrap();
+        let summaries = rows
+            .iter()
+            .rev()
+            .filter(|row| row.direction == "local")
+            .skip(offset)
+            .take(limit)
+            .map(|row| HistorySummary {
+                event: row.event,
+                metadata: payloads.get(&row.event).unwrap().meta.clone(),
+                copied_at_ms: row.time.saturating_mul(1000),
+                body_available: row.available,
+            })
+            .collect();
+        Ok((rows.len() as u64 + 1, summaries))
+    }
+    fn local_content(&self, event: EventId) -> Result<Payload> {
+        if !self
+            .rows
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|row| row.direction == "local" && row.event == event)
+        {
+            return Err("not a local history event".into());
+        }
+        self.payloads
+            .lock()
+            .unwrap()
+            .get(&event)
+            .cloned()
+            .ok_or("missing body".into())
+    }
     fn clear(&mut self) -> Result<()> {
         Ok(())
     }
@@ -186,9 +226,11 @@ impl Store for MemoryStore {
         Ok(())
     }
 }
-struct PlatformStub;
+struct PlatformStub(mpsc::Sender<(String, String)>);
 impl Platform for PlatformStub {
-    fn notify(&mut self, _: &str, _: &str) {}
+    fn notify(&mut self, title: &str, body: &str) {
+        let _ = self.0.send((title.into(), body.into()));
+    }
     fn autostart(&mut self, _: Option<bool>) -> Result<AutostartStatus> {
         Ok(AutostartStatus {
             state: AutostartState::Unavailable,
@@ -204,6 +246,7 @@ struct Harness {
     network: Arc<Mutex<NetState>>,
     fail: Arc<Mutex<bool>>,
     rows: Arc<Mutex<Vec<HistoryEntry>>>,
+    notices: mpsc::Receiver<(String, String)>,
 }
 impl Harness {
     fn new() -> Self {
@@ -223,6 +266,8 @@ impl Harness {
             );
         }
         let rows = Arc::new(Mutex::new(Vec::new()));
+        let payloads = Arc::new(Mutex::new(BTreeMap::new()));
+        let (notice_sender, notices) = mpsc::channel();
         let app = block_on(Service::new(
             [1; 32],
             [1; 16],
@@ -239,11 +284,16 @@ impl Harness {
                     fail: fail.clone(),
                     intent: false,
                     rows: rows.clone(),
+                    payloads,
                 }) as Box<dyn Store>,
             )
             .unwrap(),
             Box::new(Net(network.clone())),
-            worker("test-platform", Box::new(PlatformStub) as Box<dyn Platform>).unwrap(),
+            worker(
+                "test-platform",
+                Box::new(PlatformStub(notice_sender)) as Box<dyn Platform>,
+            )
+            .unwrap(),
         ))
         .unwrap();
         Self {
@@ -254,6 +304,7 @@ impl Harness {
             network,
             fail,
             rows,
+            notices,
         }
     }
     fn command(&self, action: Action) -> Answer {
@@ -271,6 +322,54 @@ impl Harness {
             Answer::Settings { settings } => settings,
             _ => panic!(),
         }
+    }
+}
+#[test]
+fn delivery_notifications_preserve_state_and_direction() {
+    let h = Harness::new();
+    for (state, origin, title) in [
+        (DeliveryState::Applied, [1; 32], "Clipboard sent"),
+        (DeliveryState::Applied, [2; 32], "Clipboard received"),
+        (DeliveryState::Sending, [1; 32], "Sending clipboard"),
+        (DeliveryState::Receiving, [2; 32], "Receiving clipboard"),
+        (DeliveryState::Failed, [1; 32], "Clipboard transfer failed"),
+        (
+            DeliveryState::Cancelled,
+            [1; 32],
+            "Clipboard transfer cancelled",
+        ),
+        (
+            DeliveryState::Superseded,
+            [1; 32],
+            "Clipboard transfer replaced by a newer copy",
+        ),
+        (
+            DeliveryState::Unknown,
+            [2; 32],
+            "Clipboard transfer not confirmed",
+        ),
+    ] {
+        h.network
+            .lock()
+            .unwrap()
+            .input
+            .push_back(NetworkEvent::Delivery {
+                event: EventId {
+                    origin,
+                    epoch: [1; 16],
+                    seq: 1,
+                },
+                peer: "02".repeat(32),
+                state,
+                detail: "synthetic transport diagnostic".into(),
+            });
+        block_on(h.app.tick());
+        assert_eq!(
+            h.notices
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap(),
+            (title.into(), "synthetic transport diagnostic".into())
+        );
     }
 }
 #[test]
@@ -413,6 +512,95 @@ fn receipt_queries_never_expose_another_peers_events() {
     block_on(h.app.tick());
     assert!(rx.recv().unwrap().is_err());
     assert!(h.network.lock().unwrap().sent.is_empty());
+}
+
+#[test]
+fn retained_local_history_requires_current_outgoing_permission_for_list_and_body() {
+    let h = Harness::new();
+    *h.clipboard.lock().unwrap() = value(8);
+    block_on(h.app.tick());
+    let event = h
+        .rows
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|row| row.direction == "local")
+        .unwrap()
+        .event;
+    let (tx, rx) = mpsc::sync_channel(1);
+    h.network
+        .lock()
+        .unwrap()
+        .input
+        .push_back(NetworkEvent::HistoryListQuery {
+            peer: [2; 32],
+            cursor: None,
+            limit: 20,
+            reply: tx,
+        });
+    block_on(h.app.tick());
+    let (policy_revision, page) = rx.recv().unwrap().unwrap();
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].event, event);
+    assert!(page.items[0].body_available);
+    assert_eq!(policy_revision, h.network.lock().unwrap().revision);
+    let (tx, rx) = mpsc::sync_channel(1);
+    h.network
+        .lock()
+        .unwrap()
+        .input
+        .push_back(NetworkEvent::HistoryRevisionQuery {
+            peer: [2; 32],
+            reply: tx,
+        });
+    block_on(h.app.tick());
+    assert!(rx.recv().unwrap().unwrap().1 > 0);
+
+    let old = h.settings().peers[&"02".repeat(32)].clone();
+    assert!(matches!(
+        h.command(Action::Peer {
+            id: "02".repeat(32),
+            expected: old.clone(),
+            policy: PeerPolicy { send: false, ..old },
+        }),
+        Answer::Settings { .. }
+    ));
+    let (tx, rx) = mpsc::sync_channel(1);
+    h.network
+        .lock()
+        .unwrap()
+        .input
+        .push_back(NetworkEvent::HistoryGetQuery {
+            peer: [2; 32],
+            event,
+            reply: tx,
+        });
+    block_on(h.app.tick());
+    assert!(rx.recv().unwrap().is_err());
+    let (tx, rx) = mpsc::sync_channel(1);
+    h.network
+        .lock()
+        .unwrap()
+        .input
+        .push_back(NetworkEvent::HistoryRevisionQuery {
+            peer: [2; 32],
+            reply: tx,
+        });
+    block_on(h.app.tick());
+    assert!(rx.recv().unwrap().is_err());
+    let (tx, rx) = mpsc::sync_channel(1);
+    h.network
+        .lock()
+        .unwrap()
+        .input
+        .push_back(NetworkEvent::HistoryListQuery {
+            peer: [2; 32],
+            cursor: None,
+            limit: 20,
+            reply: tx,
+        });
+    block_on(h.app.tick());
+    assert!(rx.recv().unwrap().is_err());
 }
 
 #[test]
@@ -769,4 +957,101 @@ fn quit_revokes_pending_work_and_rejects_new_operations() {
     release.send(()).unwrap();
     finish(&mut tasks);
     assert!(h.network.lock().unwrap().sent.is_empty());
+}
+
+#[test]
+fn pull_only_peers_retain_history_without_creating_live_delivery_rows() {
+    let h = Harness::new();
+    h.network
+        .lock()
+        .unwrap()
+        .input
+        .push_back(NetworkEvent::Peer(PeerInfo {
+            id: "02".repeat(32),
+            name: "Phone".into(),
+            address: "fixture".into(),
+            online: true,
+            capabilities: shuttli_model::mobile::Capabilities::pull_only(),
+        }));
+    *h.clipboard.lock().unwrap() = value(1);
+    block_on(h.app.tick());
+    let sent = h.network.lock().unwrap();
+    assert_eq!(sent.sent.len(), 1);
+    assert_eq!(sent.sent[0].target(), [3; 32]);
+    drop(sent);
+    assert!(
+        !h.rows
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.direction == "send" && r.peer == "02".repeat(32))
+    );
+    assert!(matches!(h.command(Action::Send), Answer::Done { .. }));
+    let rows = h.rows.lock().unwrap();
+    assert_eq!(rows.iter().filter(|r| r.direction == "local").count(), 2);
+    assert!(
+        !rows
+            .iter()
+            .any(|r| r.direction == "send" && r.peer == "02".repeat(32))
+    );
+}
+
+#[test]
+fn explicit_send_to_only_pull_peers_updates_history_and_reports_no_live_transfer() {
+    let h = Harness::new();
+    for byte in [2u8, 3] {
+        h.network
+            .lock()
+            .unwrap()
+            .input
+            .push_back(NetworkEvent::Peer(PeerInfo {
+                id: format!("{byte:02x}").repeat(32),
+                name: "History client".into(),
+                address: "fixture".into(),
+                online: true,
+                capabilities: shuttli_model::mobile::Capabilities::pull_only(),
+            }));
+    }
+    block_on(h.app.tick());
+    let before = match h.command(Action::Status) {
+        Answer::Status { status } => status.sequence,
+        _ => panic!(),
+    };
+    assert!(matches!(h.command(Action::Send), Answer::Done { message }
+        if message.contains("No live clipboard transfer queued")));
+    assert!(h.network.lock().unwrap().sent.is_empty());
+    let rows = h.rows.lock().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].direction, "local");
+    drop(rows);
+    assert!(
+        matches!(h.command(Action::Status), Answer::Status { status }
+        if status.sequence > before)
+    );
+}
+
+#[test]
+fn offline_copies_stay_in_local_history_without_sends_or_cancellation_notices() {
+    let h = Harness::new();
+    for id in ["02".repeat(32), "03".repeat(32)] {
+        h.network
+            .lock()
+            .unwrap()
+            .input
+            .push_back(NetworkEvent::Peer(PeerInfo {
+                id,
+                name: "Offline peer".into(),
+                address: "test".into(),
+                online: false,
+                capabilities: shuttli_model::mobile::Capabilities::legacy_desktop(),
+            }));
+    }
+    block_on(h.app.tick());
+    *h.clipboard.lock().unwrap() = value(8);
+    block_on(h.app.tick());
+    assert!(h.network.lock().unwrap().sent.is_empty());
+    let rows = h.rows.lock().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].direction, "local");
+    assert!(h.notices.try_recv().is_err());
 }
