@@ -84,7 +84,8 @@ class TailnetInstrumentedTest {
         checkpoint("desktop-text")
         remoteText("desktop tailnet text $token")
         assertEquals("phone clipboard sentinel", clipboardText())
-        await { state.snapshot.devices.any { it.id == peerId && it.historyActivity == MobileHistoryActivity.UPDATED } }
+        val expectedHistory = if (liveOnly) MobileHistoryActivity.UNSUPPORTED else MobileHistoryActivity.UPDATED
+        await { state.snapshot.devices.any { it.id == peerId && it.historyActivity == expectedHistory } }
         // Exercise the real device-detail consent UI before any phone send.
         state.selectHistory(null)
         await { state.snapshot.selected == null }
