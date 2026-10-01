@@ -501,10 +501,15 @@ impl Service {
                     .await?;
                 self.state.borrow_mut().sequence += 1;
                 self.notify(
-                    if state == DeliveryState::Applied {
-                        "Clipboard sent"
-                    } else {
-                        "Clipboard transfer failed"
+                    match state {
+                        DeliveryState::Applied if event.origin == self.id => "Clipboard sent",
+                        DeliveryState::Applied => "Clipboard received",
+                        DeliveryState::Sending => "Sending clipboard",
+                        DeliveryState::Receiving => "Receiving clipboard",
+                        DeliveryState::Failed => "Clipboard transfer failed",
+                        DeliveryState::Cancelled => "Clipboard transfer cancelled",
+                        DeliveryState::Superseded => "Clipboard transfer replaced by a newer copy",
+                        DeliveryState::Unknown => "Clipboard transfer not confirmed",
                     },
                     &detail,
                     Some(&peer),

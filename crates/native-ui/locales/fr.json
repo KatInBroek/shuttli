@@ -156,5 +156,8 @@
   "ui.app_version": "Version de l’application",
   "devices.history_pull": "Reçoit via l’historique lorsque l’application est ouverte",
   "result.history_pull": "Aucun transfert direct lancé ; les appareils autorisés récupèrent l’historique conservé",
-  "notice.receiver_confirmed": "L’appareil a confirmé la réception"
+  "notice.receiver_confirmed": "L’appareil a confirmé la réception",
+  "notice.cancelled": "Transfert du presse-papiers annulé",
+  "notice.superseded": "Transfert remplacé par une copie plus récente",
+  "notice.unconfirmed": "Transfert du presse-papiers non confirmé"
 }

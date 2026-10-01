@@ -156,5 +156,8 @@
   "ui.app_version": "App-Version",
   "devices.history_pull": "Empfängt über den Verlauf, solange die App geöffnet ist",
   "result.history_pull": "Keine direkte Übertragung gestartet; erlaubte Geräte rufen den gespeicherten Verlauf ab",
-  "notice.receiver_confirmed": "Das Gerät hat den Empfang bestätigt"
+  "notice.receiver_confirmed": "Das Gerät hat den Empfang bestätigt",
+  "notice.cancelled": "Übertragung der Zwischenablage abgebrochen",
+  "notice.superseded": "Übertragung durch eine neuere Kopie ersetzt",
+  "notice.unconfirmed": "Übertragung der Zwischenablage nicht bestätigt"
 }

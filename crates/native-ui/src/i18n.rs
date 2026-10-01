@@ -108,6 +108,28 @@ mod tests {
         assert_eq!(translate("0 device(s)", "fr"), "0 appareil");
     }
     #[test]
+    fn delivery_outcomes_have_distinct_localized_notices() {
+        for locale in ["en", "nl", "de", "fr"] {
+            let titles = [
+                "Clipboard transfer failed",
+                "Clipboard transfer cancelled",
+                "Clipboard transfer replaced by a newer copy",
+                "Clipboard transfer not confirmed",
+            ]
+            .map(|title| translate(title, locale));
+            assert_eq!(
+                titles
+                    .iter()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len(),
+                4
+            );
+            if locale != "en" {
+                assert!(titles.iter().all(|title| !title.starts_with("Clipboard")));
+            }
+        }
+    }
+    #[test]
     fn system_locale_precedence_and_fallback_are_predictable() {
         let mut env = BTreeMap::from([("LANG".into(), "nl_NL.UTF-8".into())]);
         assert_eq!(system_language(&env), "nl");

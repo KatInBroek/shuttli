@@ -226,9 +226,11 @@ impl Store for MemoryStore {
         Ok(())
     }
 }
-struct PlatformStub;
+struct PlatformStub(mpsc::Sender<(String, String)>);
 impl Platform for PlatformStub {
-    fn notify(&mut self, _: &str, _: &str) {}
+    fn notify(&mut self, title: &str, body: &str) {
+        let _ = self.0.send((title.into(), body.into()));
+    }
     fn autostart(&mut self, _: Option<bool>) -> Result<AutostartStatus> {
         Ok(AutostartStatus {
             state: AutostartState::Unavailable,
@@ -244,6 +246,7 @@ struct Harness {
     network: Arc<Mutex<NetState>>,
     fail: Arc<Mutex<bool>>,
     rows: Arc<Mutex<Vec<HistoryEntry>>>,
+    notices: mpsc::Receiver<(String, String)>,
 }
 impl Harness {
     fn new() -> Self {
@@ -264,6 +267,7 @@ impl Harness {
         }
         let rows = Arc::new(Mutex::new(Vec::new()));
         let payloads = Arc::new(Mutex::new(BTreeMap::new()));
+        let (notice_sender, notices) = mpsc::channel();
         let app = block_on(Service::new(
             [1; 32],
             [1; 16],
@@ -285,7 +289,11 @@ impl Harness {
             )
             .unwrap(),
             Box::new(Net(network.clone())),
-            worker("test-platform", Box::new(PlatformStub) as Box<dyn Platform>).unwrap(),
+            worker(
+                "test-platform",
+                Box::new(PlatformStub(notice_sender)) as Box<dyn Platform>,
+            )
+            .unwrap(),
         ))
         .unwrap();
         Self {
@@ -296,6 +304,7 @@ impl Harness {
             network,
             fail,
             rows,
+            notices,
         }
     }
     fn command(&self, action: Action) -> Answer {
@@ -313,6 +322,54 @@ impl Harness {
             Answer::Settings { settings } => settings,
             _ => panic!(),
         }
+    }
+}
+#[test]
+fn delivery_notifications_preserve_state_and_direction() {
+    let h = Harness::new();
+    for (state, origin, title) in [
+        (DeliveryState::Applied, [1; 32], "Clipboard sent"),
+        (DeliveryState::Applied, [2; 32], "Clipboard received"),
+        (DeliveryState::Sending, [1; 32], "Sending clipboard"),
+        (DeliveryState::Receiving, [2; 32], "Receiving clipboard"),
+        (DeliveryState::Failed, [1; 32], "Clipboard transfer failed"),
+        (
+            DeliveryState::Cancelled,
+            [1; 32],
+            "Clipboard transfer cancelled",
+        ),
+        (
+            DeliveryState::Superseded,
+            [1; 32],
+            "Clipboard transfer replaced by a newer copy",
+        ),
+        (
+            DeliveryState::Unknown,
+            [2; 32],
+            "Clipboard transfer not confirmed",
+        ),
+    ] {
+        h.network
+            .lock()
+            .unwrap()
+            .input
+            .push_back(NetworkEvent::Delivery {
+                event: EventId {
+                    origin,
+                    epoch: [1; 16],
+                    seq: 1,
+                },
+                peer: "02".repeat(32),
+                state,
+                detail: "synthetic transport diagnostic".into(),
+            });
+        block_on(h.app.tick());
+        assert_eq!(
+            h.notices
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap(),
+            (title.into(), "synthetic transport diagnostic".into())
+        );
     }
 }
 #[test]

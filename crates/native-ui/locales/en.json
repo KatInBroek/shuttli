@@ -156,5 +156,8 @@
   "ui.app_version": "App version",
   "devices.history_pull": "Receives through history while the app is open",
   "result.history_pull": "No live clipboard transfer queued; permitted devices retrieve retained history",
-  "notice.receiver_confirmed": "receiver confirmed its reception target"
+  "notice.receiver_confirmed": "receiver confirmed its reception target",
+  "notice.cancelled": "Clipboard transfer cancelled",
+  "notice.superseded": "Clipboard transfer replaced by a newer copy",
+  "notice.unconfirmed": "Clipboard transfer not confirmed"
 }

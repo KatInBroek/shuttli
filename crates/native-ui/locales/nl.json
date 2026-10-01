@@ -156,5 +156,8 @@
   "ui.app_version": "Appversie",
   "devices.history_pull": "Ontvangt via de geschiedenis terwijl de app open is",
   "result.history_pull": "Geen rechtstreekse overdracht gestart; toegestane apparaten halen de bewaarde geschiedenis op",
-  "notice.receiver_confirmed": "Het apparaat heeft de ontvangst bevestigd"
+  "notice.receiver_confirmed": "Het apparaat heeft de ontvangst bevestigd",
+  "notice.cancelled": "Klembordoverdracht geannuleerd",
+  "notice.superseded": "Klembordoverdracht vervangen door een nieuwere kopie",
+  "notice.unconfirmed": "Klembordoverdracht niet bevestigd"
 }
