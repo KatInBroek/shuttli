@@ -39,13 +39,15 @@ private struct HistoryView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 8) {
-                        ForEach(Array(["all", "sent_from_phone", "images"].enumerated()), id: \.offset) { index, key in
-                            Button { filter = index } label: {
-                                Text(LocalizedStringKey(key)).font(.subheadline)
-                                    .padding(.horizontal, 14).padding(.vertical, 9)
-                                    .foregroundStyle(filter == index ? Color(.systemBackground) : Color.primary)
-                                    .background(filter == index ? Color.primary : Color(.secondarySystemGroupedBackground), in: Capsule())
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(Array(["all", "sent_from_phone", "images"].enumerated()), id: \.offset) { index, key in
+                                Button { filter = index } label: {
+                                    Text(LocalizedStringKey(key)).font(.subheadline).lineLimit(1).fixedSize()
+                                        .padding(.horizontal, 14).padding(.vertical, 9)
+                                        .foregroundStyle(filter == index ? Color(.systemBackground) : Color.primary)
+                                        .background(filter == index ? Color.primary : Color(.secondarySystemGroupedBackground), in: Capsule())
+                                }
                             }
                         }
                     }

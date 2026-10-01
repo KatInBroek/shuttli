@@ -35,6 +35,8 @@ if architectures != ["arm64"] or not re.search(r"^\s*platform IOS\s*$", build_in
     raise SystemExit("Expected an arm64 iPhone device executable, not a simulator build")
 if info.get("CFBundleSupportedPlatforms") != ["iPhoneOS"]:
     raise SystemExit("Unexpected supported platforms")
+if not isinstance(info.get("UILaunchScreen"), dict):
+    raise SystemExit("Missing launch screen; iPhone may use a letterboxed compatibility layout")
 if (app / "embedded.mobileprovision").exists() or (app / "_CodeSignature").exists():
     raise SystemExit("Do not publish device provisioning profiles or signing assets")
 
