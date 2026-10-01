@@ -102,6 +102,7 @@
   "notice.receiving_content": "Inhalt wird empfangen",
   "result.autostart_off": "deaktiviert",
   "result.autostart_on": "aktiviert (bei grafischer Anmeldung dieses Benutzers)",
+  "notice.reception_confirmed": "Empfänger hat die Übernahme am Empfangsziel bestätigt",
   "notice.remote_verified": "Entfernte Zwischenablage überprüft und Empfangsbestätigung gespeichert",
   "ui.automatic": "Automatische Synchronisierung",
   "ui.manual": "Manueller Modus · Jetzt senden verwenden",

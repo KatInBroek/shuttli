@@ -102,6 +102,7 @@
   "notice.receiving_content": "inhoud wordt ontvangen",
   "result.autostart_off": "uitgeschakeld",
   "result.autostart_on": "ingeschakeld (bij grafisch aanmelden van deze gebruiker)",
+  "notice.reception_confirmed": "Ontvanger heeft ontvangst in de bestemming bevestigd",
   "notice.remote_verified": "Klembord op afstand gecontroleerd en ontvangstbevestiging opgeslagen",
   "ui.automatic": "Automatische synchronisatie",
   "ui.manual": "Handmatige modus · gebruik Nu verzenden",

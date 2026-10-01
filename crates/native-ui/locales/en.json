@@ -102,6 +102,7 @@
   "notice.receiving_content": "receiving content",
   "result.autostart_off": "disabled",
   "result.autostart_on": "enabled (current user's graphical login)",
+  "notice.reception_confirmed": "receiver confirmed its reception target",
   "notice.remote_verified": "remote OS readback and durable receipt completed",
   "ui.automatic": "Automatic sync",
   "ui.manual": "Manual mode · use Send now",

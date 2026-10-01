@@ -107,7 +107,7 @@ struct Content: View {
                     Text("Device fingerprint").font(.headline)
                     Text(model.fingerprint).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                     Text(model.clipboard)
-                    Text("A successful delivery records system clipboard readback at that time. A later copy can replace it.").foregroundStyle(.secondary)
+                    Text("A confirmed delivery means the receiver accepted the content at that time. Later copies or history cleanup can replace it.").foregroundStyle(.secondary)
                 } else if tab == 1 {
                     Text("Allow outgoing sync separately for each device. Verify its full fingerprint.")
                     ForEach(model.peers) { peer in VStack(alignment: .leading, spacing: 8) {
