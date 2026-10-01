@@ -50,7 +50,7 @@ async fn session_cleanup_preserves_replacement_and_settles_only_its_source() {
         HistoryActivity::Receiving,
         Some(event),
     );
-    let (_, stop) = watch::channel(false);
+    let (stopped, stop) = watch::channel(false);
     let context = SessionContext {
         identity: Arc::new(Identity::generate().unwrap().0),
         name: "Phone".into(),
@@ -105,11 +105,52 @@ async fn session_cleanup_preserves_replacement_and_settles_only_its_source() {
     let freshness = history.lock().unwrap().source(source).unwrap();
     assert_eq!(freshness.activity, HistoryActivity::Failed);
     assert_eq!(freshness.receiving, None);
-    let results = context.results.lock().unwrap();
-    assert_eq!(results[&(event, source)], SendState::Unknown);
-    assert_eq!(results[&(queued, source)], SendState::Failed);
-    assert_eq!(results[&(applied, source)], SendState::Applied);
-    assert_eq!(results[&(event, [3; 32])], SendState::Queued);
+    {
+        let results = context.results.lock().unwrap();
+        assert_eq!(results[&(event, source)], SendState::Unknown);
+        assert_eq!(results[&(queued, source)], SendState::Failed);
+        assert_eq!(results[&(applied, source)], SendState::Applied);
+        assert_eq!(results[&(event, [3; 32])], SendState::Queued);
+    }
+    // Background cleanup may finish after a new foreground listener starts.
+    // Its stop token must prevent it from changing the shared directory/results.
+    observe_peer(
+        &context,
+        source,
+        "Peer".into(),
+        "100.100.100.2:45987".into(),
+        Capabilities::live(),
+    )
+    .unwrap();
+    context.routes.lock().await.insert(
+        source,
+        Route {
+            initiator: source,
+            commands: current.clone(),
+        },
+    );
+    context
+        .results
+        .lock()
+        .unwrap()
+        .insert((queued, source), SendState::Queued);
+    stopped.send(true).unwrap();
+    assert!(
+        observe_peer(
+            &context,
+            source,
+            "Old peer".into(),
+            "100.100.100.2:45987".into(),
+            Capabilities::live()
+        )
+        .is_err()
+    );
+    finish_session(&context, source, generation, &current).await;
+    assert!(context.peers.lock().unwrap().direct()[0].online);
+    assert_eq!(
+        context.results.lock().unwrap()[&(queued, source)],
+        SendState::Queued
+    );
 }
 
 #[test]
@@ -561,6 +602,7 @@ async fn incoming_tls_binds_identity_before_history_and_explicit_sending() {
         })
         .await
         .unwrap();
+        suspend_peer_state(&peers, &context.results);
         stop.send(true).unwrap();
         assert!(server.await.unwrap().is_ok());
         assert!(!peers.lock().unwrap().direct()[0].online);

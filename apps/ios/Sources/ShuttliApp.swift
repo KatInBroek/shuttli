@@ -247,8 +247,8 @@ final class AppState: ObservableObject {
         draft = nil
         imageDraft = nil
         copyStatusKey = nil
-        enterBackground()
-        enterForeground()
+        sendStatusKey = nil
+        sendEvents = []
         updateSnapshot()
     }
 

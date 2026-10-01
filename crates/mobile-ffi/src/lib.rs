@@ -190,12 +190,8 @@ impl MobileSession {
     pub fn enter_background(&self) {
         if let Some(mut listener) = self.listener.lock().expect("mobile listener lock").take() {
             listener.stop();
-        }
-        if let Some(peers) = self.peers.lock().expect("mobile peers lock").as_ref() {
-            let mut directory = peers.lock().expect("mobile directory lock");
-            for peer in directory.direct() {
-                directory.disconnected(peer.id);
-            }
+        } else if let Some(peers) = self.peers.lock().expect("mobile peers lock").as_ref() {
+            shuttli_mobile_sdk::transport::suspend_peer_state(peers, &self.results);
         }
         self.history
             .lock()

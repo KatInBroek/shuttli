@@ -42,6 +42,8 @@ pub struct MobileTransport {
     commands: mpsc::Sender<SendCommand>,
     refresh: watch::Sender<u64>,
     thread: Option<std::thread::JoinHandle<()>>,
+    peers: Arc<Mutex<PeerDirectory>>,
+    results: SendResults,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,8 +111,8 @@ impl MobileTransport {
             name,
             epoch,
             history,
-            peers,
-            results,
+            peers: peers.clone(),
+            results: results.clone(),
             routes: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
             stop: receiver.clone(),
             refresh: refresh_rx,
@@ -132,6 +134,8 @@ impl MobileTransport {
             commands,
             refresh,
             thread: Some(thread),
+            peers,
+            results,
         })
     }
 
@@ -150,10 +154,32 @@ impl MobileTransport {
     }
 
     pub fn stop(&mut self) {
+        if self.thread.is_none() {
+            return;
+        }
         let _ = self.stop.send(true);
+        suspend_peer_state(&self.peers, &self.results);
         // The listener and sessions observe stop asynchronously. Avoid joining
         // a network thread on a native UI/lifecycle thread.
         self.thread.take();
+    }
+}
+
+/// Settle the old listener synchronously, before a replacement can start.
+pub fn suspend_peer_state(peers: &Arc<Mutex<PeerDirectory>>, results: &SendResults) {
+    if let Ok(mut results) = results.lock() {
+        for state in results.values_mut() {
+            *state = match *state {
+                SendState::Queued => SendState::Failed,
+                SendState::Sending => SendState::Unknown,
+                terminal => terminal,
+            };
+        }
+    }
+    if let Ok(mut directory) = peers.lock() {
+        for peer in directory.direct() {
+            directory.disconnected(peer.id);
+        }
     }
 }
 
@@ -301,21 +327,17 @@ async fn accept_peer(
     )
     .await?;
     let endpoint = SocketAddr::new(address.ip(), PORT).to_string();
-    context
-        .peers
-        .lock()
-        .map_err(|_| "peer directory unavailable")?
-        .observed_direct(
-            remote_id,
-            remote_name,
-            endpoint,
-            if legacy_pull {
-                Capabilities::pull_only()
-            } else {
-                capabilities
-            },
-        )
-        .map_err(|e| format!("{e:?}"))?;
+    observe_peer(
+        &context,
+        remote_id,
+        remote_name,
+        endpoint,
+        if legacy_pull {
+            Capabilities::pull_only()
+        } else {
+            capabilities
+        },
+    )?;
     let generation = context
         .history
         .lock()
@@ -423,12 +445,13 @@ async fn connect_candidate(candidate: Candidate, context: SessionContext) -> Res
     {
         return Err("session selection mismatch".into());
     }
-    context
-        .peers
-        .lock()
-        .map_err(|_| "peer directory unavailable")?
-        .observed_direct(remote_id, remote_name, address.to_string(), capabilities)
-        .map_err(|e| format!("{e:?}"))?;
+    observe_peer(
+        &context,
+        remote_id,
+        remote_name,
+        address.to_string(),
+        capabilities,
+    )?;
     let generation = context
         .history
         .lock()
@@ -460,6 +483,25 @@ async fn connect_candidate(candidate: Candidate, context: SessionContext) -> Res
     };
     finish_session(&context, remote_id, generation, &sender).await;
     result
+}
+
+fn observe_peer(
+    context: &SessionContext,
+    id: DeviceId,
+    name: String,
+    endpoint: String,
+    capabilities: Capabilities,
+) -> Result<()> {
+    let mut directory = context
+        .peers
+        .lock()
+        .map_err(|_| "peer directory unavailable")?;
+    if *context.stop.borrow() {
+        return Err("listener stopped".into());
+    }
+    directory
+        .observed_direct(id, name, endpoint, capabilities)
+        .map_err(|e| format!("{e:?}"))
 }
 
 async fn register_route(
@@ -500,6 +542,12 @@ async fn finish_session(
         return;
     }
     routes.remove(&source);
+    // A stopped listener shares the directory with its replacement. Lifecycle
+    // code has already settled its sends; late cleanup cannot invalidate the
+    // replacement's authenticated peers or transfer results.
+    if *context.stop.borrow() {
+        return;
+    }
     if let Ok(mut history) = context.history.lock() {
         history.source_activity(generation, source, HistoryActivity::Failed, None);
     }

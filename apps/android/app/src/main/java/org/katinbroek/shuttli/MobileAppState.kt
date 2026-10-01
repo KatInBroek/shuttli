@@ -308,14 +308,10 @@ class MobileAppState(private val app: Application) {
         scope.launch {
             lifecycle.withLock {
                 if (!active) return@withLock
-                refreshJob?.cancel()
                 session.clearHistory()
-                session.enterBackground()
-                session.enterForeground()
-                policyRestored = false
-                connect()
-                post { it.copy(history = emptyList(), transfers = emptyList(), draft = null, actionStatus = null) }
-                refreshJob = scope.launch { while (active) { connect(); refresh(); delay(2_000) } }
+                post { it.copy(history = emptyList(), transfers = emptyList(), draft = null,
+                    selected = null, preview = null, actionStatus = null, actionEvent = null, sendEvents = emptySet()) }
+                refresh()
             }
         }
     }

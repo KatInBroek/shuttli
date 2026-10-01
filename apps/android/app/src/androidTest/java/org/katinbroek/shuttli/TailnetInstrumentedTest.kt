@@ -37,7 +37,22 @@ class TailnetInstrumentedTest {
         val activity = rule.activity
         val state = (activity.application as ShuttliApplication).mobileState
         val clipboard = activity.getSystemService(ClipboardManager::class.java)
-        fun await(predicate: () -> Boolean) = rule.waitUntil(60_000, predicate)
+        fun await(predicate: () -> Boolean) {
+            try {
+                rule.waitUntil(60_000, predicate)
+            } catch (failure: Throwable) {
+                // Test-only metadata diagnostics; never log clipboard bodies.
+                Log.i("ShuttliTailnetTest", "TIMEOUT status=${state.snapshot.status} connected=${state.snapshot.connected}")
+                state.snapshot.devices.forEach {
+                    Log.i("ShuttliTailnetTest", "DEVICE peer=${it.id} online=${it.online} send=${it.send} receive=${it.receive} history=${it.historyActivity}")
+                }
+                state.snapshot.history.forEach {
+                    Log.i("ShuttliTailnetTest", "ROW event=${it.eventKey} time=${it.copiedAtMs} kind=${it.kind} available=${it.available}")
+                }
+                Log.i("ShuttliTailnetTest", "PREVIEW selected=${state.snapshot.selected?.eventKey} bytes=${state.snapshot.preview?.size}")
+                throw failure
+            }
+        }
         fun checkpoint(step: String) {
             val file = File(activity.filesDir, "tailnet-$token-$step")
             file.delete()
