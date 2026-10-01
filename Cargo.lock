@@ -1006,7 +1006,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "shuttli-adapters"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64",
  "chacha20poly1305",
@@ -1038,7 +1038,7 @@ dependencies = [
 
 [[package]]
 name = "shuttli-api"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde",
  "shuttli-model",
@@ -1046,7 +1046,7 @@ dependencies = [
 
 [[package]]
 name = "shuttli-application"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64",
  "shuttli-api",
@@ -1058,11 +1058,11 @@ dependencies = [
 
 [[package]]
 name = "shuttli-brand"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "shuttli-cli"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde_json",
  "shuttli-api",
@@ -1072,7 +1072,7 @@ dependencies = [
 
 [[package]]
 name = "shuttli-content"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "png",
  "sha2",
@@ -1081,7 +1081,7 @@ dependencies = [
 
 [[package]]
 name = "shuttli-contract-tests"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "shuttli-adapters",
  "shuttli-core",
@@ -1091,14 +1091,14 @@ dependencies = [
 
 [[package]]
 name = "shuttli-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "shuttli-model",
 ]
 
 [[package]]
 name = "shuttli-host"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde_json",
  "shuttli-adapters",
@@ -1114,7 +1114,7 @@ dependencies = [
 
 [[package]]
 name = "shuttli-identity"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "rcgen",
  "rustls",
@@ -1127,7 +1127,7 @@ dependencies = [
 
 [[package]]
 name = "shuttli-mobile-ffi"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "hex",
  "shuttli-content",
@@ -1138,7 +1138,7 @@ dependencies = [
 
 [[package]]
 name = "shuttli-mobile-sdk"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "chacha20poly1305",
  "getrandom 0.2.17",
@@ -1159,14 +1159,14 @@ dependencies = [
 
 [[package]]
 name = "shuttli-model"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "shuttli-native-ui"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde_json",
  "shuttli-brand",
@@ -1174,7 +1174,7 @@ dependencies = [
 
 [[package]]
 name = "shuttli-ports"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "shuttli-core",
  "shuttli-model",
@@ -1182,7 +1182,7 @@ dependencies = [
 
 [[package]]
 name = "shuttli-protocol"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -1191,14 +1191,14 @@ dependencies = [
 
 [[package]]
 name = "shuttli-runtime"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "shuttli-ports",
 ]
 
 [[package]]
 name = "shuttli-transport"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde_json",
  "shuttli-content",
