@@ -10,6 +10,20 @@ fi
 export PATH="$repo_dir/target/mobile-tools/xcodegen/bin:$PATH"
 command -v xcodegen >/dev/null || { echo "Install XcodeGen 2.46.0 first" >&2; exit 1; }
 command -v xcodebuild >/dev/null || { echo "Xcode is required" >&2; exit 1; }
+# Native C/assembly dependencies must use the same minimum OS as the app.
+# Otherwise an SDK default can silently require a newer iOS than the IPA declares.
+IPHONEOS_DEPLOYMENT_TARGET=$(python3 - "$repo_dir/apps/ios/project.yml" <<'PY'
+from pathlib import Path
+import re
+import sys
+match = re.search(r'^\s+IPHONEOS_DEPLOYMENT_TARGET:\s*"([0-9]+\.[0-9]+)"\s*$',
+                  Path(sys.argv[1]).read_text(), re.MULTILINE)
+if not match:
+    raise SystemExit('Missing iOS deployment target')
+print(match.group(1))
+PY
+)
+export IPHONEOS_DEPLOYMENT_TARGET
 
 case $(uname -m) in
   arm64) simulator_target=aarch64-apple-ios-sim; simulator_arch=arm64 ;;
