@@ -117,7 +117,7 @@ private struct HistoryCard: View {
             }
             HStack {
                 Button { state.copyToPhone(row) } label: { Label("copy_to_phone", systemImage: "doc.on.doc") }
-                    .buttonStyle(.bordered).disabled(data.isEmpty)
+                    .buttonStyle(.borderedProminent).disabled(data.isEmpty)
                 if row.isLocal {
                     Button("send_again") { state.resend(row) }.disabled(data.isEmpty || state.allowedSendCount == 0)
                         .font(.subheadline)

@@ -154,7 +154,7 @@ private fun HistoryCard(row: MobileHistoryRow, data: UiSnapshot, state: MobileAp
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                FilledTonalButton(onClick = { state.copyToPhone(row) }, enabled = body != null, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
+                Button(onClick = { state.copyToPhone(row) }, enabled = body != null, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
                     Icon(AppIcon.Copy.vector, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text(stringResource(R.string.copy_to_phone))
                 }
                 if (data.actionEvent == row.eventKey && data.actionStatus != null) {
