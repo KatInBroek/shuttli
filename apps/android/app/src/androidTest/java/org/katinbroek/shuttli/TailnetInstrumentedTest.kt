@@ -158,6 +158,8 @@ class TailnetInstrumentedTest {
 
         rule.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
         await { state.snapshot.connected == 0u && state.snapshot.draft == null }
+        assertTrue(state.snapshot.devices.none { it.online })
+        assertNotEquals("connected", state.snapshot.status)
         checkpoint("background")
         rule.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
         remoteText("desktop offline text $token")

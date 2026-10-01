@@ -103,7 +103,7 @@ final class AppState: ObservableObject {
         session.enterBackground()
         draft = nil
         imageDraft = nil
-        connectedPeerCount = 0
+        updateSnapshot()
     }
 
     private func updateSnapshot() {
@@ -116,6 +116,7 @@ final class AppState: ObservableObject {
         }
         connectedPeerCount = session.connectedPeersCount()
         if connectedPeerCount > 0 { connectionStatusKey = "devices_connected" }
+        else if connectionStatusKey == "devices_connected" { connectionStatusKey = "waiting_for_devices" }
     }
 
     func body(for row: MobileHistoryRow) -> Data {

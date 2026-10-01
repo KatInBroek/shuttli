@@ -66,6 +66,8 @@ final class AppStateTests: XCTestCase {
         state.enterBackground()
         XCTAssertNil(state.imageDraft)
         XCTAssertEqual(state.connectedPeerCount, 0)
+        XCTAssertTrue(state.deviceRows.allSatisfy { !$0.online })
+        XCTAssertNotEqual(state.connectionStatusKey, "devices_connected")
         state.importText("next snapshot")
         state.enterBackground()
         XCTAssertNil(state.draft)

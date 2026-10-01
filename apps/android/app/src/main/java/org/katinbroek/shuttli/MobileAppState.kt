@@ -98,7 +98,8 @@ class MobileAppState(private val app: Application) {
                 refreshJob?.cancel()
                 refreshJob = null
                 session.enterBackground()
-                withContext(Dispatchers.Main) { snapshot = snapshot.copy(draft = null, selected = null, preview = null, connected = 0u) }
+                refresh()
+                post { it.copy(draft = null, selected = null, preview = null, connected = 0u, status = "waiting") }
             }
         }
     }
