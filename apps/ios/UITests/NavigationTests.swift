@@ -16,7 +16,15 @@ final class NavigationTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["No matching copies"].exists)
         capture(app, "connected-history-image")
         app.tabBars.buttons["Devices"].tap()
-        let peer = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Online")).firstMatch
+        if let secondPeerName = ProcessInfo.processInfo.environment["SHUTTLI_NETWORK_SECOND_PEER"] {
+            let secondPeer = app.buttons.matching(NSPredicate(
+                format: "label CONTAINS %@ AND label CONTAINS %@", secondPeerName, "Online")).firstMatch
+            XCTAssertTrue(secondPeer.waitForExistence(timeout: 75),
+                          "A second peer learned through the roster must become online")
+            capture(app, "connected-second-peer")
+        }
+        let peer = app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@ AND label CONTAINS %@", "Online", "History list updated")).firstMatch
         XCTAssertTrue(peer.waitForExistence(timeout: 10))
         capture(app, "connected-devices")
         peer.tap()
