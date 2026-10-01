@@ -424,7 +424,11 @@ impl MobileHistory {
     /// Reserve body space in timeline order across all sources. A missing body
     /// still occupies its prospective slot, so reconciliation cannot repeatedly
     /// download content that retention would immediately evict.
-    pub(crate) fn pending_bodies(&self, source: DeviceId) -> Vec<EventId> {
+    pub(crate) fn pending_bodies(
+        &self,
+        source: DeviceId,
+        allowed: impl Fn(shuttli_model::sync::Format) -> bool,
+    ) -> Vec<EventId> {
         if !self.wants_body() {
             return Vec::new();
         }
@@ -433,21 +437,25 @@ impl MobileHistory {
             .into_iter()
             .take(self.limit)
             .filter_map(|row| {
-                if row.body.is_none() && !row.summary.body_available {
+                // Count every retained cached body, including one below a missing
+                // newer row. trim() still counts that body until a replacement
+                // actually arrives; skipping it would permit download/evict loops.
+                if let Some(body) = &row.body {
+                    bytes = bytes.saturating_add(body.size());
                     return None;
                 }
-                let size = row
-                    .body
-                    .as_ref()
-                    .map_or(row.summary.metadata.size as usize, CachedBody::size);
+                if row.source != source
+                    || !row.summary.body_available
+                    || !allowed(row.summary.metadata.format)
+                {
+                    return None;
+                }
+                let size = row.summary.metadata.size as usize;
                 if bytes.saturating_add(size) > MAX_SESSION_BYTES {
                     return None;
                 }
                 bytes += size;
-                (row.source == source
-                    && row.summary.body_available
-                    && !self.body_available(row.summary.event))
-                .then_some(row.summary.event)
+                Some(row.summary.event)
             })
             .collect()
     }

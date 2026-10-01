@@ -412,12 +412,12 @@ fn pending_bodies_exclude_trimmed_rows_and_already_cached_content() {
         .merge_page(generation, source, old.clone(), 1)
         .unwrap();
     history.merge_page(generation, source, latest, 2).unwrap();
-    assert_eq!(history.pending_bodies(source), vec![event]);
+    assert_eq!(history.pending_bodies(source, |_| true), vec![event]);
     history
         .cache_body(generation, event, b"latest".to_vec())
         .unwrap();
     history.merge_page(generation, source, old, 3).unwrap();
-    assert!(history.pending_bodies(source).is_empty());
+    assert!(history.pending_bodies(source, |_| true).is_empty());
     assert_eq!(history.timeline().len(), 1);
 }
 
@@ -453,12 +453,88 @@ fn body_budget_reserves_cached_and_pending_content_across_sources() {
             },
         );
     }
-    let pending = history.pending_bodies(source);
+    let pending = history.pending_bodies(source, |_| true);
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].seq, 2);
     assert_eq!(
-        history.pending_bodies(source),
+        history.pending_bodies(source, |_| true),
         pending,
         "reconciliation cannot reset the body budget"
     );
+}
+
+#[test]
+fn body_budget_counts_cached_rows_below_missing_rows_without_starving_allowed_formats() {
+    let mut history = MobileHistory::new(4);
+    history.enter_foreground();
+    let source = [1; 32];
+    // Newest to oldest: another source missing 2 MiB, two cached 8 MiB
+    // images, then a missing 4 MiB image. trim() counts both cached images.
+    for (seq, size, cached, owner) in [
+        (4, 2, false, [2; 32]),
+        (3, 8, true, source),
+        (2, 8, true, source),
+        (1, 4, false, source),
+    ] {
+        let bytes = size * 1024 * 1024;
+        let event = EventId {
+            origin: owner,
+            epoch: [3; 16],
+            seq,
+        };
+        history.rows.insert(
+            event,
+            TimelineItem {
+                source: owner,
+                summary: HistorySummary {
+                    event,
+                    metadata: Metadata {
+                        format: Format::Png,
+                        size: bytes as u64,
+                        digest: [1; 32],
+                    },
+                    copied_at_ms: seq,
+                    body_available: true,
+                },
+                body: cached.then(|| CachedBody::Memory(vec![0; bytes].into())),
+                live_received: false,
+            },
+        );
+    }
+    assert!(history.pending_bodies(source, |_| true).is_empty());
+    assert_eq!(history.pending_bodies([2; 32], |_| true).len(), 1);
+    // Disabled images cannot reserve capacity ahead of an allowed text body.
+    history.rows.clear();
+    for (seq, format, size) in [
+        (3, Format::Png, (MAX_SESSION_BYTES / 2) as u64),
+        (2, Format::Png, (MAX_SESSION_BYTES / 2) as u64),
+        (1, Format::Text, 1),
+    ] {
+        let event = EventId {
+            origin: source,
+            epoch: [3; 16],
+            seq,
+        };
+        history.rows.insert(
+            event,
+            TimelineItem {
+                source,
+                summary: HistorySummary {
+                    event,
+                    metadata: Metadata {
+                        format,
+                        size,
+                        digest: [1; 32],
+                    },
+                    copied_at_ms: seq,
+                    body_available: true,
+                },
+                body: None,
+                live_received: false,
+            },
+        );
+    }
+    let pending = history.pending_bodies(source, |format| format == Format::Text);
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].seq, 1);
 }

@@ -96,7 +96,10 @@ final class AppState: ObservableObject {
             connectionStatusKey = "tailscale_unavailable"
             return
         }
-        if listenerAddress == address { return }
+        if listenerAddress == address {
+            connectionStatusKey = "waiting_for_devices"
+            return
+        }
         if !permissionsRestored {
             for (id, directions) in DevicePolicyStore.load() {
                 guard session.restoreDevicePolicy(peerId: id, send: directions.send, receive: directions.receive, text: directions.text, image: directions.image) else {

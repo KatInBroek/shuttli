@@ -712,11 +712,14 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                 next_cursor = None;
             }
             // A live reception can fill an item that a previous page queued.
+            let body_policy = history_body_policy(context, source)?;
             while body_queue.front().is_some_and(|event| {
-                history
-                    .lock()
-                    .ok()
-                    .is_some_and(|h| !h.pending_bodies(source).contains(event))
+                history.lock().ok().is_some_and(|h| {
+                    !h.pending_bodies(source, |format| {
+                        body_policy.is_some_and(|policy| policy.allows(format))
+                    })
+                    .contains(event)
+                })
             }) {
                 body_queue.pop_front();
             }
@@ -834,20 +837,17 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                         }
                         next_cursor = next;
                         let page = shuttli_model::mobile::HistoryListResponse { source_epoch: page_epoch, revision, items, next };
-                        let candidates = {
+                        let body_policy = history_body_policy(context, source)?;
+                        {
                             let mut cache = history.lock().map_err(|_| "history unavailable")?;
                             match cache.merge_page(generation, source, page, now_ms()) {
                                 Ok(()) => {},
                                 Err(crate::HistoryError::Disabled) => { body_queue.clear(); next_cursor = None; continue; }
                                 Err(error) => return Err(format!("{error:?}")),
                             }
-                            cache.pending_bodies(source).into_iter().filter_map(|event| {
-                                cache.rows.get(&event).map(|row| (event, row.summary.metadata.format))
-                            }).collect::<Vec<_>>()
-                        };
-                        body_queue = candidates.into_iter()
-                            .filter(|(_, format)| content_allowed(context, source, *format))
-                            .map(|(event, _)| event).collect();
+                            body_queue = cache.pending_bodies(source,
+                                |format| body_policy.is_some_and(|policy| policy.allows(format))).into();
+                        }
                         if !can_query(context, source) { body_queue.clear(); next_cursor = None; }
                         if body_queue.is_empty() && next_cursor.is_none() {
                             history.lock().map_err(|_| "history unavailable")?.source_activity(generation, source, HistoryActivity::Updated, None);
@@ -857,6 +857,7 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                         let bytes = timeout(Duration::from_secs(20), shuttli_transport::receive_body(stream, &metadata, || true))
                             .await.map_err(|_| "history body timeout")??;
                         if can_query(context, source) && content_allowed(context, source, metadata.format) && history.lock().map_err(|_| "history unavailable")?.wants_body() && history.lock().map_err(|_| "history unavailable")?.generation() == generation && peers.lock().map_err(|_| "peer directory unavailable")?.policy_revision() == pending_revision {
+                            let body_policy = history_body_policy(context, source)?;
                             let mut cache = history.lock().map_err(|_| "history unavailable")?;
                             // Another source or live reception may trim a queued row.
                             // Consume the verified body, then discard it without dropping the session.
@@ -864,7 +865,7 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                                 if row.summary.metadata != metadata {
                                     return Err("history body metadata mismatch".into());
                                 }
-                                if cache.pending_bodies(source).contains(&event) {
+                                if cache.pending_bodies(source, |format| body_policy.is_some_and(|policy| policy.allows(format))).contains(&event) {
                                     cache.cache_body(generation, event, bytes).map_err(|e| format!("{e:?}"))?;
                                 }
                             }
@@ -1208,6 +1209,20 @@ fn can_query(context: &SessionContext, source: DeviceId) -> bool {
                 .iter()
                 .any(|peer| peer.id == source && peer.capabilities.history_pull)
         })
+}
+
+fn history_body_policy(
+    context: &SessionContext,
+    source: DeviceId,
+) -> Result<Option<crate::peers::Directions>> {
+    Ok(context
+        .peers
+        .lock()
+        .map_err(|_| "peer directory unavailable")?
+        .direct()
+        .into_iter()
+        .find(|peer| peer.id == source && peer.online && peer.directions.receive)
+        .map(|peer| peer.directions))
 }
 
 fn content_allowed(context: &SessionContext, source: DeviceId, format: Format) -> bool {
