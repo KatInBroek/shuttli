@@ -56,3 +56,5 @@ xcodebuild -project apps/ios/Shuttli.xcodeproj -scheme Shuttli \
   -destination 'generic/platform=iOS Simulator' -sdk iphonesimulator \
   -derivedDataPath target/ios-derived \
   CODE_SIGNING_ALLOWED=NO "ARCHS=$simulator_arch" ONLY_ACTIVE_ARCH=YES build
+
+bash tools/mobile/package_ios.sh

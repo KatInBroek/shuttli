@@ -70,6 +70,30 @@ Use in-app hints by default; system notification permission is not required. Nev
 
 Design waiting/discovery, identity/consent, paste preview, per-target progress, unified history, source freshness, local copy outcome, settings and failure screens. Differentiate Listed, Available in app, local copy result, desktop Applied for phone-origin sends, unknown, cancelled, superseded, missing content and persistence/cleanup failure. Unknown diagnostics must remain unknown. Coordinate assets through [desktop design #49](https://github.com/KatInBroek/shuttli/issues/49).
 
+## Building and installing a personal test build
+
+On a Mac with Xcode, run `bash tools/mobile/install_xcodegen.sh`, then
+`bash tools/mobile/build_ios.sh`. This builds the simulator app and an unsigned
+arm64 device package at `target/mobile-ios/shuttli-device-unsigned.ipa`, with a
+commit and checksum manifest alongside it. CI publishes the same files as the
+`ios-device-package` artifact. The packaging gate verifies the device platform,
+architecture and archive contents. A simulator app cannot be installed on an
+iPhone.
+
+The IPA must be signed for the intended device before installation. For personal
+testing, Xcode can use a free Apple Account's Personal Team. With a Linux host,
+a third-party signing and installation tool such as
+[iloader](https://github.com/nab138/iloader) can import the IPA and sign it using
+the user's account. Connect the unlocked phone by USB, approve the computer's
+Trust prompt, and follow the on-device developer trust and Developer Mode steps.
+Enter account credentials only in the local signing tool; they are never needed
+by the build pipeline. Unsigned CI packages are not TestFlight or App Store
+releases, and successful packaging does not establish physical-device acceptance.
+
+Free Personal Team provisioning expires after seven days, requiring another
+signing/install cycle. See Apple's
+[account limitations](https://developer.apple.com/help/account/basics/about-your-developer-account).
+
 ## Independent tasks
 
 | ID | Acceptance |

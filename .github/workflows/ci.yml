@@ -86,8 +86,16 @@ jobs:
           rustc --version
       - name: Install pinned XcodeGen
         run: bash tools/mobile/install_xcodegen.sh
-      - name: Build iOS simulator app and device library without signing
+      - name: Build iOS simulator app and unsigned device IPA
         run: bash tools/mobile/build_ios.sh
+      - name: Upload unsigned iOS device package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ios-device-package
+          path: |
+            target/mobile-ios/shuttli-device-unsigned.ipa
+            target/mobile-ios/manifest.json
+          if-no-files-found: error
       - name: Test iOS app state and native navigation
         run: bash tools/mobile/verify_ios_simulator.sh
       - name: Upload iOS tests and coverage
