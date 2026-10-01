@@ -92,7 +92,7 @@
     <string name="receiving">Ontvangen</string>
     <string name="sending">Verzenden</string>
     <string name="receive_help">Ontvang nieuwe kopieën en haal recente geschiedenis op terwijl deze app open is. Kopieën blijven in de app totdat je op Kopiëren tikt.</string>
-    <string name="send_help">Verzenden is altijd handmatig. Eerst Plakken, dan Verzenden.</string>
+    <string name="send_help">Plakken en Verzenden zijn handmatig. Als dit apparaat mag ontvangen, kan het ook bewaarde kopieën van deze telefoon ophalen en uw verbonden apparaten ontdekken.</string>
     <string name="device_fingerprint">Apparaatvingerafdruk</string>
     <string name="confirm_device">Dit apparaat bevestigen</string>
     <string name="fingerprint_help">Open op %1$s Status › Verbindingsdetails en vergelijk de volledige vingerafdruk voordat je verzenden toestaat.</string>

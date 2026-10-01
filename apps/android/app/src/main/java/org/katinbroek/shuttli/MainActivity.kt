@@ -15,5 +15,8 @@ class MainActivity : ComponentActivity() {
         setContent { ShuttliScreen(state, this) }
     }
     override fun onStart() { super.onStart(); state.enterForeground() }
-    override fun onStop() { state.enterBackground(); super.onStop() }
+    override fun onStop() {
+        if (!isChangingConfigurations) state.enterBackground()
+        super.onStop()
+    }
 }

@@ -85,7 +85,7 @@ async fn session_cleanup_preserves_replacement_and_settles_only_its_source() {
             .commands
             .same_channel(&current)
     );
-    finish_session(&context, source, generation, &old).await;
+    finish_session(&context, source, generation, &old.downgrade()).await;
     drop(old);
     assert!(old_receiver.recv().await.is_none());
     assert_eq!(
@@ -100,7 +100,7 @@ async fn session_cleanup_preserves_replacement_and_settles_only_its_source() {
         ((applied, source), SendState::Applied),
         ((event, [3; 32]), SendState::Queued),
     ]);
-    finish_session(&context, source, generation, &current).await;
+    finish_session(&context, source, generation, &current.downgrade()).await;
     assert!(!context.routes.lock().await.contains_key(&source));
     let freshness = history.lock().unwrap().source(source).unwrap();
     assert_eq!(freshness.activity, HistoryActivity::Failed);
@@ -145,7 +145,7 @@ async fn session_cleanup_preserves_replacement_and_settles_only_its_source() {
         )
         .is_err()
     );
-    finish_session(&context, source, generation, &current).await;
+    finish_session(&context, source, generation, &current.downgrade()).await;
     assert!(context.peers.lock().unwrap().direct()[0].online);
     assert_eq!(
         context.results.lock().unwrap()[&(queued, source)],
@@ -663,7 +663,7 @@ async fn explicit_offer_requires_send_consent_and_applied_reply() {
     context.history.lock().unwrap().enter_foreground();
     let (mut phone, mut desktop) = tokio::io::duplex(1024);
     assert_eq!(
-        send_offer(&mut phone, &command, &context).await.unwrap(),
+        send_offer(&mut phone, &command, &context).await.unwrap().0,
         SendState::Failed
     );
     peers
@@ -691,7 +691,7 @@ async fn explicit_offer_requires_send_consent_and_applied_reply() {
         )
         .unwrap();
     assert_eq!(
-        send_offer(&mut phone, &command, &context).await.unwrap(),
+        send_offer(&mut phone, &command, &context).await.unwrap().0,
         SendState::Failed
     );
     peers
@@ -706,7 +706,7 @@ async fn explicit_offer_requires_send_consent_and_applied_reply() {
         )
         .unwrap();
     assert_eq!(
-        send_offer(&mut phone, &command, &context).await.unwrap(),
+        send_offer(&mut phone, &command, &context).await.unwrap().0,
         SendState::Failed
     );
     let command = test_command(&peers, source, bytes.clone());
@@ -720,7 +720,7 @@ async fn explicit_offer_requires_send_consent_and_applied_reply() {
     desktop.read_exact(&mut body).await.unwrap();
     assert_eq!(body, &*bytes);
     write_frame(&mut desktop, &FrameV2::Applied).await.unwrap();
-    assert_eq!(task.await.unwrap().unwrap(), SendState::Applied);
+    assert_eq!(task.await.unwrap().unwrap(), (SendState::Applied, true));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1191,10 +1191,19 @@ fn test_command(
 
 #[tokio::test(flavor = "current_thread")]
 async fn two_endpoints_pull_each_others_history_and_keep_live_delivery_and_clear_working() {
-    let identities = [
+    run_bidirectional_history(100).await;
+    run_bidirectional_history(5).await;
+}
+
+async fn run_bidirectional_history(limit: usize) {
+    let mut identities = [
         Identity::generate().unwrap().0,
         Identity::generate().unwrap().0,
     ];
+    identities.sort_by_key(|identity| identity.id);
+    if limit == 5 {
+        identities.reverse();
+    }
     let ids = [identities[0].id, identities[1].id];
     let mut contexts = Vec::new();
     let mut stops = Vec::new();
@@ -1220,7 +1229,7 @@ async fn two_endpoints_pull_each_others_history_and_keep_live_delivery_and_clear
                 },
             )
             .unwrap();
-        let history = Arc::new(Mutex::new(MobileHistory::new(100)));
+        let history = Arc::new(Mutex::new(MobileHistory::new(limit)));
         let generation = history.lock().unwrap().enter_foreground();
         let (stop, stop_rx) = watch::channel(false);
         let (sender, receiver) = mpsc::channel(8);
@@ -1285,7 +1294,7 @@ async fn two_endpoints_pull_each_others_history_and_keep_live_delivery_and_clear
                     .iter()
                     .filter(|r| r.source == ids[1 - i] && r.body.is_some())
                     .count()
-                    == 23
+                    >= if limit == 100 { 23 } else { 1 }
             }) {
                 break;
             }
@@ -1298,6 +1307,43 @@ async fn two_endpoints_pull_each_others_history_and_keep_live_delivery_and_clear
     })
     .await
     .expect("bidirectional paginated history bodies");
+    for context in &contexts {
+        assert!(context.history.lock().unwrap().timeline().len() <= limit);
+    }
+    let refused = test_command(&contexts[0].peers, ids[1], Arc::from(&b"revoked copy"[..]));
+    let refused_event = refused.event();
+    contexts[0]
+        .peers
+        .lock()
+        .unwrap()
+        .directions(ids[1], crate::peers::Directions::default())
+        .unwrap();
+    senders[0].send(refused).await.unwrap();
+    timeout(Duration::from_secs(3), async {
+        while contexts[0]
+            .results
+            .lock()
+            .unwrap()
+            .get(&(refused_event, ids[1]))
+            != Some(&SendState::Failed)
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    contexts[0]
+        .peers
+        .lock()
+        .unwrap()
+        .directions(
+            ids[1],
+            crate::peers::Directions {
+                send: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
     let command = test_command(&contexts[0].peers, ids[1], Arc::from(&b"new live copy"[..]));
     let event = command.event();
     senders[0].send(command).await.unwrap();

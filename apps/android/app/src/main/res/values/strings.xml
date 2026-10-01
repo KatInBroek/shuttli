@@ -92,7 +92,7 @@
     <string name="receiving">Receiving</string>
     <string name="sending">Sending</string>
     <string name="receive_help">While this app is open, receive new copies and retrieve recent history. Copies stay in the app until you tap Copy.</string>
-    <string name="send_help">Sending is always manual. Paste first, then Send.</string>
+    <string name="send_help">Paste and Send are manual. Allowing this device to receive also lets it fetch retained copies made on this phone and discover your connected devices.</string>
     <string name="device_fingerprint">Device fingerprint</string>
     <string name="confirm_device">Confirm this device</string>
     <string name="fingerprint_help">On %1$s, open Status › Connection details and compare the full fingerprint before allowing sending.</string>

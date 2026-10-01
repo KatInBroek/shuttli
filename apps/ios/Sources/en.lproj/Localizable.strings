@@ -91,7 +91,7 @@
 "receiving" = "Receiving";
 "sending" = "Sending";
 "receive_help" = "While this app is open, receive new copies and retrieve recent history. Copies stay in the app until you tap Copy.";
-"send_help" = "Sending is always manual. Paste first, then Send.";
+"send_help" = "Paste and Send are manual. Allowing this device to receive also lets it fetch retained copies made on this phone and discover your connected devices.";
 "device_fingerprint" = "Device fingerprint";
 "confirm_device" = "Confirm this device";
 "fingerprint_help" = "On %@, open Status › Connection details and compare the full fingerprint before allowing sending.";

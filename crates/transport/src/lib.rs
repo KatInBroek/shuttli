@@ -214,6 +214,8 @@ pub fn valid_metadata(meta: &Metadata) -> bool {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum SendOutcome {
+    /// Local validation failed before an OFFER was written. The turn is still owned.
+    NotOffered,
     Applied,
     Rejected,
 }
@@ -296,7 +298,7 @@ where
         || meta.size != body.len() as u64
         || shuttli_content::canonical_digest(meta.format, body).ok() != Some(meta.digest)
     {
-        return Ok(SendOutcome::Rejected);
+        return Ok(SendOutcome::NotOffered);
     }
     write_live_frame(
         stream,

@@ -91,7 +91,7 @@
 "receiving" = "Empfangen";
 "sending" = "Senden";
 "receive_help" = "Bei geöffneter App neue Kopien empfangen und den letzten Verlauf abrufen. Kopien bleiben in der App, bis du auf Kopieren tippst.";
-"send_help" = "Senden erfolgt immer manuell. Erst Einfügen, dann Senden.";
+"send_help" = "Einfügen und Senden erfolgen manuell. Wenn dieses Gerät empfangen darf, kann es auch gespeicherte Kopien dieses Telefons abrufen und Ihre verbundenen Geräte entdecken.";
 "device_fingerprint" = "Gerätefingerabdruck";
 "confirm_device" = "Dieses Gerät bestätigen";
 "fingerprint_help" = "Öffne auf %@ Status › Verbindungsdetails und vergleiche den vollständigen Fingerabdruck, bevor du Senden erlaubst.";

@@ -91,7 +91,7 @@
 "receiving" = "Réception";
 "sending" = "Envoi";
 "receive_help" = "Quand cette app est ouverte, recevez les nouvelles copies et récupérez l’historique récent. Les copies restent dans l’app jusqu’à ce que vous touchiez Copier.";
-"send_help" = "L’envoi est toujours manuel. Collez, puis envoyez.";
+"send_help" = "Coller et Envoyer sont manuels. Autoriser cet appareil à recevoir lui permet aussi de récupérer les copies conservées de ce téléphone et de découvrir vos appareils connectés.";
 "device_fingerprint" = "Empreinte de l’appareil";
 "confirm_device" = "Confirmer cet appareil";
 "fingerprint_help" = "Sur %@, ouvrez État › Détails de connexion et comparez l’empreinte complète avant d’autoriser l’envoi.";

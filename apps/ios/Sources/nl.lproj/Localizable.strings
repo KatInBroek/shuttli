@@ -91,7 +91,7 @@
 "receiving" = "Ontvangen";
 "sending" = "Verzenden";
 "receive_help" = "Ontvang nieuwe kopieën en haal recente geschiedenis op terwijl deze app open is. Kopieën blijven in de app totdat je op Kopiëren tikt.";
-"send_help" = "Verzenden is altijd handmatig. Eerst Plakken, dan Verzenden.";
+"send_help" = "Plakken en Verzenden zijn handmatig. Als dit apparaat mag ontvangen, kan het ook bewaarde kopieën van deze telefoon ophalen en uw verbonden apparaten ontdekken.";
 "device_fingerprint" = "Apparaatvingerafdruk";
 "confirm_device" = "Dit apparaat bevestigen";
 "fingerprint_help" = "Open op %@ Status › Verbindingsdetails en vergelijk de volledige vingerafdruk voordat je verzenden toestaat.";

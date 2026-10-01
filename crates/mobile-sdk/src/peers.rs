@@ -117,8 +117,8 @@ impl PeerDirectory {
                     (
                         hex::encode(p.id),
                         PeerPolicy {
-                            send: p.online && p.directions.send,
-                            receive: p.online && p.directions.receive,
+                            send: p.directions.send,
+                            receive: p.directions.receive,
                             text: p.directions.text,
                             png: p.directions.image,
                             ..PeerPolicy::default()
@@ -136,14 +136,20 @@ impl PeerDirectory {
     }
 
     pub fn manual(&mut self, metadata: &Metadata) -> Result<Vec<Publication>, Rejection> {
-        self.core.manual(
+        let mut permits = self.core.manual(
             ClipboardStamp {
                 generation: 0,
                 digest: metadata.digest,
                 sensitive: false,
             },
             metadata,
-        )
+        )?;
+        permits.retain(|permit| {
+            self.direct
+                .get(&permit.target())
+                .is_some_and(|peer| peer.online)
+        });
+        Ok(permits)
     }
     pub fn may_send(&self, permit: &Publication) -> bool {
         self.core.may_send(permit)
@@ -220,6 +226,10 @@ impl PeerDirectory {
             .map_err(|_| DirectoryError::Capacity)?;
         self.configure_core();
         Ok(())
+    }
+
+    pub(crate) fn reset_hints(&mut self, source: DeviceId) {
+        self.hints.remove(&source);
     }
 
     pub fn disconnected(&mut self, id: DeviceId) {

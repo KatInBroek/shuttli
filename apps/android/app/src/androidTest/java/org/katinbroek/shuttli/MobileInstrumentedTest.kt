@@ -44,6 +44,22 @@ class MobileInstrumentedTest {
         assertTrue((activity.application as ShuttliApplication).mobileState.snapshot.history.none { it.isLocal })
     }
 
+    @Test fun configurationRecreationPreservesTheImportedDraftAndIdentity() {
+        val activity = rule.activity
+        val state = (activity.application as ShuttliApplication).mobileState
+        val clipboard = activity.getSystemService(ClipboardManager::class.java)
+        val text = "recreation fixture"
+        rule.runOnUiThread { clipboard.setPrimaryClip(ClipData.newPlainText("fixture", text)) }
+        rule.onNodeWithText(activity.getString(R.string.paste_clipboard)).performClick()
+        rule.waitUntil(5000) { state.snapshot.draft is Draft.Text && state.snapshot.fingerprint.isNotEmpty() }
+        val fingerprint = state.snapshot.fingerprint
+        rule.activityRule.scenario.recreate()
+        rule.waitForIdle()
+        assertEquals(Draft.Text(text), state.snapshot.draft)
+        assertEquals(fingerprint, state.snapshot.fingerprint)
+        assertTrue(state.snapshot.transfers.isEmpty())
+    }
+
     @Test fun threeTabsKeepTheSendPanelOnlyOnHome() {
         val activity = rule.activity
         rule.onNodeWithText(activity.getString(R.string.paste_clipboard)).assertExists()

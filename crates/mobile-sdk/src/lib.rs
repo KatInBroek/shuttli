@@ -421,6 +421,36 @@ impl MobileHistory {
         }
         Ok(())
     }
+    /// Reserve body space in timeline order across all sources. A missing body
+    /// still occupies its prospective slot, so reconciliation cannot repeatedly
+    /// download content that retention would immediately evict.
+    pub(crate) fn pending_bodies(&self, source: DeviceId) -> Vec<EventId> {
+        if !self.wants_body() {
+            return Vec::new();
+        }
+        let mut bytes = 0usize;
+        self.timeline()
+            .into_iter()
+            .take(self.limit)
+            .filter_map(|row| {
+                if row.body.is_none() && !row.summary.body_available {
+                    return None;
+                }
+                let size = row
+                    .body
+                    .as_ref()
+                    .map_or(row.summary.metadata.size as usize, CachedBody::size);
+                if bytes.saturating_add(size) > MAX_SESSION_BYTES {
+                    return None;
+                }
+                bytes += size;
+                (row.source == source
+                    && row.summary.body_available
+                    && !self.body_available(row.summary.event))
+                .then_some(row.summary.event)
+            })
+            .collect()
+    }
     pub fn body_available(&self, event: EventId) -> bool {
         self.rows.get(&event).is_some_and(|row| match &row.body {
             Some(CachedBody::Memory(_)) => true,

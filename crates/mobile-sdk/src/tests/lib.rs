@@ -397,3 +397,68 @@ fn bounded_timeline_marks_partial_sources() {
     assert_eq!(history.timeline()[0].summary.event.seq, 2);
     assert!(history.source(source).unwrap().partial);
 }
+
+#[test]
+fn pending_bodies_exclude_trimmed_rows_and_already_cached_content() {
+    let mut history = MobileHistory::new(1);
+    let generation = history.enter_foreground();
+    let source = [1; 32];
+    let mut old = page(source, [3; 16], 1, b"old");
+    old.items[0].copied_at_ms = 1;
+    let mut latest = page(source, [3; 16], 2, b"latest");
+    latest.items[0].copied_at_ms = 2;
+    let event = latest.items[0].event;
+    history
+        .merge_page(generation, source, old.clone(), 1)
+        .unwrap();
+    history.merge_page(generation, source, latest, 2).unwrap();
+    assert_eq!(history.pending_bodies(source), vec![event]);
+    history
+        .cache_body(generation, event, b"latest".to_vec())
+        .unwrap();
+    history.merge_page(generation, source, old, 3).unwrap();
+    assert!(history.pending_bodies(source).is_empty());
+    assert_eq!(history.timeline().len(), 1);
+}
+
+#[test]
+fn body_budget_reserves_cached_and_pending_content_across_sources() {
+    let mut history = MobileHistory::new(3);
+    history.enter_foreground();
+    let source = [1; 32];
+    for seq in 1..=3 {
+        let owner = if seq == 3 { [2; 32] } else { source };
+        let event = EventId {
+            origin: owner,
+            epoch: [3; 16],
+            seq,
+        };
+        history.rows.insert(
+            event,
+            TimelineItem {
+                source: owner,
+                summary: HistorySummary {
+                    event,
+                    metadata: Metadata {
+                        format: Format::Png,
+                        size: (MAX_SESSION_BYTES / 2) as u64,
+                        digest: [1; 32],
+                    },
+                    copied_at_ms: seq,
+                    body_available: true,
+                },
+                // This test exercises budget accounting only; no image decoding is needed.
+                body: (seq == 3).then(|| CachedBody::Memory(vec![0; MAX_SESSION_BYTES / 2].into())),
+                live_received: false,
+            },
+        );
+    }
+    let pending = history.pending_bodies(source);
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].seq, 2);
+    assert_eq!(
+        history.pending_bodies(source),
+        pending,
+        "reconciliation cannot reset the body budget"
+    );
+}

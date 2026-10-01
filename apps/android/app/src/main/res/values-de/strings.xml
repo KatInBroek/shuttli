@@ -92,7 +92,7 @@
     <string name="receiving">Empfangen</string>
     <string name="sending">Senden</string>
     <string name="receive_help">Bei geöffneter App neue Kopien empfangen und den letzten Verlauf abrufen. Kopien bleiben in der App, bis du auf Kopieren tippst.</string>
-    <string name="send_help">Senden erfolgt immer manuell. Erst Einfügen, dann Senden.</string>
+    <string name="send_help">Einfügen und Senden erfolgen manuell. Wenn dieses Gerät empfangen darf, kann es auch gespeicherte Kopien dieses Telefons abrufen und Ihre verbundenen Geräte entdecken.</string>
     <string name="device_fingerprint">Gerätefingerabdruck</string>
     <string name="confirm_device">Dieses Gerät bestätigen</string>
     <string name="fingerprint_help">Öffne auf %1$s Status › Verbindungsdetails und vergleiche den vollständigen Fingerabdruck, bevor du Senden erlaubst.</string>

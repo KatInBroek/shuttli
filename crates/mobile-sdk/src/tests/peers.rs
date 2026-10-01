@@ -264,3 +264,58 @@ fn content_permissions_and_directory_capacity_are_independent() {
             .is_ok()
     );
 }
+
+#[test]
+fn unrelated_connection_flaps_do_not_change_policy_or_invalidate_permits() {
+    let mut directory = PeerDirectory::new([1; 32]);
+    for id in [2, 3] {
+        directory
+            .observed_direct(
+                [id; 32],
+                format!("peer{id}"),
+                format!("100.64.0.{id}:45987"),
+                Capabilities::live(),
+            )
+            .unwrap();
+        directory
+            .directions(
+                [id; 32],
+                Directions {
+                    send: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+    }
+    let metadata = Metadata {
+        format: Format::Text,
+        size: 1,
+        digest: [4; 32],
+    };
+    let permits = directory.manual(&metadata).unwrap();
+    let active = permits
+        .iter()
+        .find(|permit| permit.target() == [2; 32])
+        .unwrap();
+    let revision = directory.policy_revision();
+    directory.disconnected([3; 32]);
+    assert_eq!(directory.policy_revision(), revision);
+    assert!(directory.may_send(active));
+    assert!(
+        directory
+            .manual(&metadata)
+            .unwrap()
+            .iter()
+            .all(|permit| permit.target() == [2; 32])
+    );
+    directory
+        .observed_direct(
+            [3; 32],
+            "peer3".into(),
+            "100.64.0.3:45987".into(),
+            Capabilities::live(),
+        )
+        .unwrap();
+    assert_eq!(directory.policy_revision(), revision);
+    assert!(directory.may_send(active));
+}

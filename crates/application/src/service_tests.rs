@@ -1029,3 +1029,29 @@ fn explicit_send_to_only_pull_peers_updates_history_and_reports_no_live_transfer
         if status.sequence > before)
     );
 }
+
+#[test]
+fn offline_copies_stay_in_local_history_without_sends_or_cancellation_notices() {
+    let h = Harness::new();
+    for id in ["02".repeat(32), "03".repeat(32)] {
+        h.network
+            .lock()
+            .unwrap()
+            .input
+            .push_back(NetworkEvent::Peer(PeerInfo {
+                id,
+                name: "Offline peer".into(),
+                address: "test".into(),
+                online: false,
+                capabilities: shuttli_model::mobile::Capabilities::legacy_desktop(),
+            }));
+    }
+    block_on(h.app.tick());
+    *h.clipboard.lock().unwrap() = value(8);
+    block_on(h.app.tick());
+    assert!(h.network.lock().unwrap().sent.is_empty());
+    let rows = h.rows.lock().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].direction, "local");
+    assert!(h.notices.try_recv().is_err());
+}

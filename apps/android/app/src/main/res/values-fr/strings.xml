@@ -92,7 +92,7 @@
     <string name="receiving">Réception</string>
     <string name="sending">Envoi</string>
     <string name="receive_help">Quand cette app est ouverte, recevez les nouvelles copies et récupérez l’historique récent. Les copies restent dans l’app jusqu’à ce que vous touchiez Copier.</string>
-    <string name="send_help">L’envoi est toujours manuel. Collez, puis envoyez.</string>
+    <string name="send_help">Coller et Envoyer sont manuels. Autoriser cet appareil à recevoir lui permet aussi de récupérer les copies conservées de ce téléphone et de découvrir vos appareils connectés.</string>
     <string name="device_fingerprint">Empreinte de l’appareil</string>
     <string name="confirm_device">Confirmer cet appareil</string>
     <string name="fingerprint_help">Sur %1$s, ouvrez État › Détails de connexion et comparez l’empreinte complète avant d’autoriser l’envoi.</string>

@@ -46,6 +46,10 @@ final class AppState: ObservableObject {
     private let session = MobileSession()
     private var refreshTask: Task<Void, Never>?
     private var sendEvents: Set<String> = []
+    private var active = false
+    private var identityBytes: Data?
+    private var listenerAddress: String?
+    private var permissionsRestored = false
 
     static func sendStatus(_ states: [MobileTransferState]) -> String {
         if states.isEmpty { return "transfer_unknown" }
@@ -57,6 +61,8 @@ final class AppState: ObservableObject {
     }
 
     func enterForeground() {
+        guard !active else { return }
+        active = true
         refreshTask?.cancel()
         _ = session.enterForeground()
         if let cacheDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
@@ -67,7 +73,21 @@ final class AppState: ObservableObject {
         historyLimit = settings.limit
         session.setHistoryMode(mode: nativeMode(settings.mode))
         _ = session.setHistoryLimit(limit: UInt32(settings.limit))
-        guard let identity = DeviceIdentityStore.loadOrCreate() else {
+        connectListener()
+        updateSnapshot()
+        refreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                self?.connectListener()
+                self?.updateSnapshot()
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+        }
+    }
+
+    private func connectListener() {
+        guard active else { return }
+        if identityBytes == nil { identityBytes = DeviceIdentityStore.loadOrCreate() }
+        guard let identity = identityBytes else {
             connectionStatusKey = "identity_unavailable"
             return
         }
@@ -76,28 +96,28 @@ final class AppState: ObservableObject {
             connectionStatusKey = "tailscale_unavailable"
             return
         }
-        for (id, directions) in DevicePolicyStore.load() {
-            guard session.restoreDevicePolicy(peerId: id, send: directions.send, receive: directions.receive, text: directions.text, image: directions.image) else {
-                connectionStatusKey = "listener_unavailable"
-                return
+        if listenerAddress == address { return }
+        if !permissionsRestored {
+            for (id, directions) in DevicePolicyStore.load() {
+                guard session.restoreDevicePolicy(peerId: id, send: directions.send, receive: directions.receive, text: directions.text, image: directions.image) else {
+                    connectionStatusKey = "listener_unavailable"
+                    return
+                }
             }
+            permissionsRestored = true
         }
         let error = session.startListener(
             identityBytes: identity,
             tailscaleIp: address,
             name: UIDevice.current.name
         )
+        if error.isEmpty { listenerAddress = address }
         connectionStatusKey = error.isEmpty ? "waiting_for_devices" : "listener_unavailable"
-        updateSnapshot()
-        refreshTask = Task { [weak self] in
-            while !Task.isCancelled {
-                self?.updateSnapshot()
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-            }
-        }
     }
 
     func enterBackground() {
+        active = false
+        listenerAddress = nil
         refreshTask?.cancel()
         refreshTask = nil
         session.enterBackground()

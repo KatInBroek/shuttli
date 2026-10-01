@@ -234,7 +234,7 @@ async fn initial_denial_invalid_metadata_and_wrong_ready_do_not_send_bodies() {
             )
             .await
             .unwrap(),
-            SendOutcome::Rejected
+            SendOutcome::NotOffered
         );
         assert!(
             timeout(
@@ -263,7 +263,7 @@ async fn initial_denial_invalid_metadata_and_wrong_ready_do_not_send_bodies() {
             )
             .await
             .unwrap(),
-            SendOutcome::Rejected
+            SendOutcome::NotOffered
         );
         let tx = tokio::spawn(async move {
             send_live_version(

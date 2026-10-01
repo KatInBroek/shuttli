@@ -235,13 +235,9 @@ impl Service {
             }
         }
         for permit in permits {
-            if self
-                .state
-                .borrow()
-                .peers
-                .iter()
-                .any(|p| p.id == format_id(permit.target()) && !p.capabilities.accept_live_offer)
-            {
+            if !self.state.borrow().peers.iter().any(|p| {
+                p.id == format_id(permit.target()) && p.online && p.capabilities.accept_live_offer
+            }) {
                 continue;
             }
             let event = permit.event();

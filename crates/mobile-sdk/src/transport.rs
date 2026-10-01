@@ -344,7 +344,8 @@ async fn accept_peer(
         .map_err(|_| "history unavailable")?
         .generation();
     let (sender, commands) = mpsc::channel(8);
-    register_route(&context, remote_id, remote_id, sender.clone()).await?;
+    let cleanup = sender.downgrade();
+    register_route(&context, remote_id, remote_id, sender).await?;
     let result = if version == WireVersion::V1 {
         live_v1_session(
             &mut tls,
@@ -367,7 +368,7 @@ async fn accept_peer(
         )
         .await
     };
-    finish_session(&context, remote_id, generation, &sender).await;
+    finish_session(&context, remote_id, generation, &cleanup).await;
     result
 }
 
@@ -458,7 +459,8 @@ async fn connect_candidate(candidate: Candidate, context: SessionContext) -> Res
         .map_err(|_| "history unavailable")?
         .generation();
     let (sender, commands) = mpsc::channel(8);
-    register_route(&context, remote_id, context.identity.id, sender.clone()).await?;
+    let cleanup = sender.downgrade();
+    register_route(&context, remote_id, context.identity.id, sender).await?;
     let result = if version == WireVersion::V1 {
         live_v1_session(
             &mut tls,
@@ -481,7 +483,7 @@ async fn connect_candidate(candidate: Candidate, context: SessionContext) -> Res
         )
         .await
     };
-    finish_session(&context, remote_id, generation, &sender).await;
+    finish_session(&context, remote_id, generation, &cleanup).await;
     result
 }
 
@@ -517,6 +519,11 @@ async fn register_route(
     {
         return Err("preferred session already active".into());
     }
+    context
+        .peers
+        .lock()
+        .map_err(|_| "peer directory unavailable")?
+        .reset_hints(peer);
     routes.insert(
         peer,
         Route {
@@ -531,14 +538,15 @@ async fn register_route(
 async fn finish_session(
     context: &SessionContext,
     source: DeviceId,
-    generation: u64,
-    sender: &mpsc::Sender<SendCommand>,
+    _generation: u64,
+    sender: &mpsc::WeakSender<SendCommand>,
 ) {
     let mut routes = context.routes.lock().await;
-    if routes
-        .get(&source)
-        .is_none_or(|current| !current.commands.same_channel(sender))
-    {
+    if routes.get(&source).is_none_or(|current| {
+        sender
+            .upgrade()
+            .is_none_or(|sender| !current.commands.same_channel(&sender))
+    }) {
         return;
     }
     routes.remove(&source);
@@ -549,6 +557,7 @@ async fn finish_session(
         return;
     }
     if let Ok(mut history) = context.history.lock() {
+        let generation = history.generation();
         history.source_activity(generation, source, HistoryActivity::Failed, None);
     }
     if let Ok(mut results) = context.results.lock() {
@@ -596,7 +605,6 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
     let mut pending_body: Option<EventId> = None;
     let mut body_queue = VecDeque::new();
     let mut next_cursor = None;
-    let mut body_budget = crate::MAX_SESSION_BYTES;
     let mut refresh = tokio::time::interval(Duration::from_secs(15));
     refresh.tick().await;
     let mut refresh_needed = true;
@@ -669,8 +677,8 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
             && frame_reader.is_idle()
         {
             if let Some(command) = deferred_command.take() {
-                let outcome = if command.target() != source {
-                    SendState::Failed
+                let (outcome, offered) = if command.target() != source {
+                    (SendState::Failed, false)
                 } else {
                     match timeout(
                         Duration::from_secs(20),
@@ -679,13 +687,13 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                     .await
                     {
                         Ok(Ok(state)) => state,
-                        _ => SendState::Unknown,
+                        _ => (SendState::Unknown, true),
                     }
                 };
                 if let Ok(mut results) = context.results.lock() {
                     results.insert((command.event(), command.target()), outcome);
                 }
-                granted = leader;
+                granted = leader || !offered;
                 refresh_needed = true;
                 poll_needed = live_protocol;
                 if outcome == SendState::Unknown {
@@ -708,7 +716,7 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                 history
                     .lock()
                     .ok()
-                    .is_some_and(|h| h.body_available(*event))
+                    .is_some_and(|h| !h.pending_bodies(source).contains(event))
             }) {
                 body_queue.pop_front();
             }
@@ -748,7 +756,6 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                 granted = leader;
             } else if refresh_needed && can_query(context, source) {
                 refresh_needed = false;
-                body_budget = crate::MAX_SESSION_BYTES;
                 pending_revision = peers
                     .lock()
                     .map_err(|_| "peer directory unavailable")?
@@ -827,23 +834,20 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                         }
                         next_cursor = next;
                         let page = shuttli_model::mobile::HistoryListResponse { source_epoch: page_epoch, revision, items, next };
-                        let wants_body = history.lock().map_err(|_| "history unavailable")?.wants_body();
-                        let candidates: Vec<_> = page.items.iter().filter(|i| i.body_available && wants_body && content_allowed(context, source, i.metadata.format))
-                            .map(|i| (i.event, i.metadata.size)).collect();
-                        {
+                        let candidates = {
                             let mut cache = history.lock().map_err(|_| "history unavailable")?;
                             match cache.merge_page(generation, source, page, now_ms()) {
                                 Ok(()) => {},
                                 Err(crate::HistoryError::Disabled) => { body_queue.clear(); next_cursor = None; continue; }
                                 Err(error) => return Err(format!("{error:?}")),
                             }
-                            for (event, size) in candidates {
-                                if cache.body_for_explicit_copy(event).is_none() && size <= body_budget as u64 {
-                                    body_budget -= size as usize;
-                                    body_queue.push_back(event);
-                                }
-                            }
-                        }
+                            cache.pending_bodies(source).into_iter().filter_map(|event| {
+                                cache.rows.get(&event).map(|row| (event, row.summary.metadata.format))
+                            }).collect::<Vec<_>>()
+                        };
+                        body_queue = candidates.into_iter()
+                            .filter(|(_, format)| content_allowed(context, source, *format))
+                            .map(|(event, _)| event).collect();
                         if !can_query(context, source) { body_queue.clear(); next_cursor = None; }
                         if body_queue.is_empty() && next_cursor.is_none() {
                             history.lock().map_err(|_| "history unavailable")?.source_activity(generation, source, HistoryActivity::Updated, None);
@@ -853,13 +857,17 @@ async fn mobile_session<S: AsyncRead + AsyncWrite + Unpin>(
                         let bytes = timeout(Duration::from_secs(20), shuttli_transport::receive_body(stream, &metadata, || true))
                             .await.map_err(|_| "history body timeout")??;
                         if can_query(context, source) && content_allowed(context, source, metadata.format) && history.lock().map_err(|_| "history unavailable")?.wants_body() && history.lock().map_err(|_| "history unavailable")?.generation() == generation && peers.lock().map_err(|_| "peer directory unavailable")?.policy_revision() == pending_revision {
-                            if history.lock().map_err(|_| "history unavailable")?.timeline()
-                                .iter().find(|row| row.summary.event == event)
-                                .is_none_or(|row| row.summary.metadata != metadata) {
-                                return Err("history body metadata mismatch".into());
+                            let mut cache = history.lock().map_err(|_| "history unavailable")?;
+                            // Another source or live reception may trim a queued row.
+                            // Consume the verified body, then discard it without dropping the session.
+                            if let Some(row) = cache.rows.get(&event) {
+                                if row.summary.metadata != metadata {
+                                    return Err("history body metadata mismatch".into());
+                                }
+                                if cache.pending_bodies(source).contains(&event) {
+                                    cache.cache_body(generation, event, bytes).map_err(|e| format!("{e:?}"))?;
+                                }
                             }
-                            history.lock().map_err(|_| "history unavailable")?
-                                .cache_body(generation, event, bytes).map_err(|e| format!("{e:?}"))?;
                         } else {
                             refresh_needed = true;
                             body_queue.clear();
@@ -939,7 +947,9 @@ async fn live_v1_session<S: AsyncRead + AsyncWrite + Unpin>(
         match frame {
             FrameV2::Poll if !initiator => {
                 if let Ok(command) = commands.try_recv() {
-                    execute_v1_send(stream, &command, context).await?;
+                    if !execute_v1_send(stream, &command, context).await? {
+                        write_live_frame(stream, &FrameV2::Idle, version).await?;
+                    }
                 } else {
                     write_live_frame(stream, &FrameV2::Idle, version).await?;
                 }
@@ -1015,22 +1025,22 @@ async fn execute_v1_send<S: AsyncRead + AsyncWrite + Unpin>(
     stream: &mut S,
     command: &SendCommand,
     context: &SessionContext,
-) -> Result<()> {
-    let outcome = timeout(
+) -> Result<bool> {
+    let (outcome, offered) = timeout(
         Duration::from_secs(20),
         send_offer_version(stream, command, context, WireVersion::V1),
     )
     .await
     .ok()
     .and_then(std::result::Result::ok)
-    .unwrap_or(SendState::Unknown);
+    .unwrap_or((SendState::Unknown, true));
     if let Ok(mut results) = context.results.lock() {
         results.insert((command.event(), command.target()), outcome);
     }
     if outcome == SendState::Unknown {
         Err("outgoing result unknown".into())
     } else {
-        Ok(())
+        Ok(offered)
     }
 }
 
@@ -1223,7 +1233,7 @@ async fn send_offer<S: AsyncRead + AsyncWrite + Unpin>(
     stream: &mut S,
     command: &SendCommand,
     context: &SessionContext,
-) -> Result<SendState> {
+) -> Result<(SendState, bool)> {
     send_offer_version(stream, command, context, WireVersion::V2).await
 }
 async fn send_offer_version<S: AsyncRead + AsyncWrite + Unpin>(
@@ -1231,12 +1241,12 @@ async fn send_offer_version<S: AsyncRead + AsyncWrite + Unpin>(
     command: &SendCommand,
     context: &SessionContext,
     version: WireVersion,
-) -> Result<SendState> {
+) -> Result<(SendState, bool)> {
     if command.event().origin != context.identity.id
         || command.event().epoch != context.epoch
         || command.event().seq == 0
     {
-        return Ok(SendState::Failed);
+        return Ok((SendState::Failed, false));
     }
     let result = shuttli_transport::send_live_version(
         stream,
@@ -1274,8 +1284,9 @@ async fn send_offer_version<S: AsyncRead + AsyncWrite + Unpin>(
     )
     .await?;
     Ok(match result {
-        shuttli_transport::SendOutcome::Applied => SendState::Applied,
-        shuttli_transport::SendOutcome::Rejected => SendState::Failed,
+        shuttli_transport::SendOutcome::Applied => (SendState::Applied, true),
+        shuttli_transport::SendOutcome::Rejected => (SendState::Failed, true),
+        shuttli_transport::SendOutcome::NotOffered => (SendState::Failed, false),
     })
 }
 

@@ -664,7 +664,9 @@ async fn incoming_connection(s: Arc<Shared>, stream: TcpStream, address: SocketA
                             .await;
                         }
                         report_transfer(&s, &out, &r).await;
-                        r?;
+                        if matches!(r?, TransferResult::NotOffered) {
+                            write_frame(&mut tls, &Frame::Idle).await?;
+                        }
                     } else {
                         write_frame(&mut tls, &Frame::Idle).await?;
                     }
@@ -840,7 +842,9 @@ async fn serve_v2_session(
                 } else {
                     let pending = s.pending.lock().await.remove(&id);
                     if let Some(out) = pending {
-                        send_pending_v2(s, tls, out).await?;
+                        if !send_pending_v2(s, tls, out).await? {
+                            write_v2_frame(tls, &FrameV2::Idle).await?;
+                        }
                     } else {
                         write_v2_frame(tls, &FrameV2::Idle).await?;
                     }
@@ -908,7 +912,7 @@ async fn serve_v2_session(
     }
     Ok(())
 }
-async fn send_pending_v2(s: &Shared, tls: &mut impl Duplex, out: Outbound) -> Result<()> {
+async fn send_pending_v2(s: &Shared, tls: &mut impl Duplex, out: Outbound) -> Result<bool> {
     let result = timeout(
         DEADLINE,
         shuttli_transport::send_live(
@@ -928,6 +932,10 @@ async fn send_pending_v2(s: &Shared, tls: &mut impl Duplex, out: Outbound) -> Re
             DeliveryState::Applied,
             "receiver confirmed its reception target".into(),
         ),
+        Ok(shuttli_transport::SendOutcome::NotOffered) => (
+            DeliveryState::Cancelled,
+            "send cancelled before offer".into(),
+        ),
         Ok(shuttli_transport::SendOutcome::Rejected) => {
             (DeliveryState::Failed, "receiver rejected transfer".into())
         }
@@ -945,7 +953,7 @@ async fn send_pending_v2(s: &Shared, tls: &mut impl Duplex, out: Outbound) -> Re
         .await;
     }
     report(s, &out, state, detail).await;
-    result.map(|_| ())
+    result.map(|outcome| outcome != shuttli_transport::SendOutcome::NotOffered)
 }
 
 async fn query_transfer_v2(s: &Shared, tls: &mut impl Duplex, mut query: Query) -> Result<()> {
@@ -1022,6 +1030,10 @@ fn transfer_outcome(result: &Result<TransferResult>) -> (DeliveryState, String) 
             "receiver confirmed its reception target".into(),
         ),
         Ok(TransferResult::Rejected(message)) => (DeliveryState::Failed, message.clone()),
+        Ok(TransferResult::NotOffered) => (
+            DeliveryState::Cancelled,
+            "send cancelled before offer".into(),
+        ),
         Err(message) => (DeliveryState::Unknown, message.clone()),
     }
 }
@@ -1131,6 +1143,7 @@ fn safe_remote_error(message: &str) -> String {
 }
 #[derive(Clone)]
 enum TransferResult {
+    NotOffered,
     Applied,
     Rejected(String),
 }
@@ -1153,6 +1166,7 @@ async fn send_transfer(
     )
     .await?
     {
+        shuttli_transport::SendOutcome::NotOffered => Ok(TransferResult::NotOffered),
         shuttli_transport::SendOutcome::Applied => Ok(TransferResult::Applied),
         shuttli_transport::SendOutcome::Rejected => Ok(TransferResult::Rejected(
             safe_remote_error("receiver denied transfer"),

@@ -25,7 +25,7 @@ packages are not yet published. Tailscale must be installed separately.
 - New devices have outgoing sync disabled. Allow individual device fingerprints; receiving is enabled by default.
 - Independent global/per-device send, receive and content controls; automatic or manual sync.
 - Core-owned publication/write permissions and conservative clipboard echo suppression.
-- Success only after the receiver reads back the OS clipboard and persists its result.
+- Live transfer succeeds only after the receiver verifies and commits the content through its reception adapter and acknowledges the result. Desktop reception applies the OS clipboard; mobile reception retains content in foreground history until you choose Copy.
 - Ordinary local copies enter history even when sending is paused; received items retain their source and outgoing items retain each target's result.
 - Configurable recent history (20 events by default): RAM-only text/list, encrypted temporary image cache, preview/copy/resend, and automatic/manual cache cleanup.
 - macOS menu bar/native window; Linux system tray with global send/receive controls and an on-demand GTK4 window; the same local API powers CLI and UI.
