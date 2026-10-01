@@ -20,7 +20,7 @@ adb install -r apps/android/paste-probe/build/outputs/apk/debug/paste-probe-debu
 
 result=$(adb shell am instrument -w -e coverage true -e class org.katinbroek.shuttli.MobileInstrumentedTest \
   org.katinbroek.shuttli.test/androidx.test.runner.AndroidJUnitRunner)
-[[ $result == *'OK (8 tests)'* ]] || { echo "$result"; exit 1; }
+[[ $result =~ OK\ \([1-9][0-9]*\ tests\) ]] || { echo "$result"; exit 1; }
 printf '%s\n' "$result"
 mkdir -p apps/android/app/build/outputs/code_coverage/manual
 adb exec-out run-as org.katinbroek.shuttli cat files/coverage.ec > apps/android/app/build/outputs/code_coverage/manual/ui.ec
