@@ -29,8 +29,10 @@ jobs:
           foreach ($file in $manifest.files) {
             if ((Get-FileHash "$package/$($file.name)" -Algorithm SHA256).Hash.ToLowerInvariant() -ne $file.sha256) { throw 'Payload checksum mismatch' }
           }
+          $env:SHUTTLI_DATA_DIR = Join-Path $env:RUNNER_TEMP 'shuttli-help-must-not-create-a-profile'
           $help = & "$package/shuttli.exe" --help
           if ($LASTEXITCODE -ne 0) { throw 'Packaged CLI failed' }
+          if (Test-Path $env:SHUTTLI_DATA_DIR) { throw 'CLI help unexpectedly touched a profile' }
           $help
       - name: Upload portable package and checksum
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

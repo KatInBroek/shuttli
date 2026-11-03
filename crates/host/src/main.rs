@@ -5,6 +5,11 @@ mod unix;
 mod windows;
 fn main() -> std::process::ExitCode {
     let args: Vec<_> = std::env::args().skip(1).collect();
+    // Read-only CLI help must not create/secure a profile or need a desktop.
+    if args.len() == 1 && matches!(args[0].as_str(), "--help" | "-h" | "help") {
+        println!("{}\n{}", shuttli_brand::NAME, shuttli_cli::control::HELP);
+        return std::process::ExitCode::SUCCESS;
+    }
     if args.len() == 1 && matches!(args[0].as_str(), "--version" | "-V" | "version") {
         println!("{} {}", shuttli_brand::NAME, shuttli_brand::VERSION);
         return std::process::ExitCode::SUCCESS;
