@@ -6,12 +6,16 @@ The dark-panel tray PNGs are the supplied T01–T05 artwork at 16/24/32 px.
 
 - `mark.svg`: compact brand mark; the display name beside it comes from `branding/name.txt`.
 - `app-icon.svg`: launcher icon; installed under the stable `org.shuttli.Control` ID.
+- `app-icon-256.png`: unchanged v2 delivery export of the same approved app icon;
+  embedded in Windows window/launcher resources.
 - `tray/`: outgoing + incoming arrows, outgoing only, incoming only, pause bars,
   dashed unavailable outline. Shape communicates state independently of color.
 - `python3 tools/render_tray_icons.py` regenerates the small cached ARGB pixmaps
   embedded in the tray. Pillow is only a development dependency.
 
-Current fallback pixmaps target dark system panels, as validated on GNOME.
-Automatic adaptation to arbitrary light third-party panels remains unverified.
+Linux fallback pixmaps target dark system panels, as validated on GNOME.
+Windows includes the approved v2 on-light PNGs as well and selects 16/24/32 px
+artwork using the Windows system-panel theme and native small-icon size.
+Automatic Linux adaptation to arbitrary light third-party panels remains unverified.
 The old product wordmark from the design package is intentionally not embedded;
 product text uses the central brand setting.

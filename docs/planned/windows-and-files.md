@@ -1,6 +1,6 @@
 # Windows and regular-file extension contracts
 
-Status: planned. Windows native integration and file transfer are not implemented. Track [Windows tasks](https://github.com/KatInBroek/shuttli/milestone/7) and [file tasks](https://github.com/KatInBroek/shuttli/milestone/8). Their delivery gates are independent.
+Status: Windows native source-build preview implemented; broader Windows acceptance and file transfer remain planned. See [Windows build and local acceptance](../install/windows.md). Track [Windows tasks](https://github.com/KatInBroek/shuttli/milestone/7) and [file tasks](https://github.com/KatInBroek/shuttli/milestone/8). Their delivery gates are independent.
 
 ## Shared architecture
 

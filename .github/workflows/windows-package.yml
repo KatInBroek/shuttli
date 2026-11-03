@@ -1,0 +1,42 @@
+name: Windows package
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - name: Build from locked dependencies
+        shell: pwsh
+        run: |
+          $env:RUSTFLAGS = "--remap-path-prefix=$env:GITHUB_WORKSPACE=/src --remap-path-prefix=$env:USERPROFILE=/builder"
+          cargo build --release --locked -p shuttli-host
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./tools/package_windows.ps1
+      - name: Inspect portable package
+        shell: pwsh
+        run: |
+          Expand-Archive target/windows-package/Shuttli-windows-x64.zip target/package-inspection
+          $package = 'target/package-inspection/Shuttli-windows-x64'
+          $manifest = Get-Content "$package/build.json" -Raw | ConvertFrom-Json
+          if ($manifest.commit -ne $env:GITHUB_SHA) { throw 'Source commit mismatch' }
+          foreach ($file in $manifest.files) {
+            if ((Get-FileHash "$package/$($file.name)" -Algorithm SHA256).Hash.ToLowerInvariant() -ne $file.sha256) { throw 'Payload checksum mismatch' }
+          }
+          $help = & "$package/shuttli.exe" --help
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged CLI failed' }
+          $help
+      - name: Upload portable package and checksum
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-x64-preview
+          path: |
+            target/windows-package/*.zip
+            target/windows-package/*.sha256
+          if-no-files-found: error

@@ -1,5 +1,5 @@
 use super::*;
-use crate::content::{MAX_BYTES, payload};
+use crate::content::{MAX_BYTES, capture_payload};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 use shuttli_model::sync::{ClipboardStamp, Format};
 use shuttli_ports::sync::{ClipboardValue, Payload};
@@ -322,7 +322,7 @@ impl XClipboard {
             }
         }
         let data = if let Some((f, t)) = format {
-            Some(payload(f, selection(&c, w, &a, t)?)?)
+            capture_payload(f, selection(&c, w, &a, t)?)?
         } else {
             None
         };

@@ -159,5 +159,9 @@
   "notice.receiver_confirmed": "receiver confirmed its reception target",
   "notice.cancelled": "Clipboard transfer cancelled",
   "notice.superseded": "Clipboard transfer replaced by a newer copy",
-  "notice.unconfirmed": "Clipboard transfer not confirmed"
+  "notice.unconfirmed": "Clipboard transfer not confirmed",
+  "appearance.label": "Appearance",
+  "appearance.system": "System",
+  "appearance.light": "Light",
+  "appearance.dark": "Dark"
 }

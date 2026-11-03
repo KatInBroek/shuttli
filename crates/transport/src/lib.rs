@@ -110,12 +110,22 @@ pub async fn read_live_frame(
         FrameV1::Select { initiator } => FrameV2::Select { initiator },
         FrameV1::Status { event } => FrameV2::Status { event },
         FrameV1::Receipt { event, state } => FrameV2::Receipt { event, state },
-        FrameV1::Error { .. } => FrameV2::Error {
-            code: "offer_rejected".into(),
+        FrameV1::Error { message } => FrameV2::Error {
+            code: bounded_rejection(&message),
         },
     };
     frame.encode().map_err(str::to_owned)?;
     Ok(frame)
+}
+fn bounded_rejection(message: &str) -> String {
+    let mut code = String::new();
+    for character in message.chars().filter(|c| !c.is_control()) {
+        if code.len() + character.len_utf8() > 64 {
+            break;
+        }
+        code.push(character);
+    }
+    code
 }
 
 /// A single request turn prevents simultaneous OFFERs and history requests
@@ -217,7 +227,7 @@ pub enum SendOutcome {
     /// Local validation failed before an OFFER was written. The turn is still owned.
     NotOffered,
     Applied,
-    Rejected,
+    Rejected(String),
 }
 
 pub struct LiveOffer<'a> {
@@ -311,7 +321,7 @@ where
     .await?;
     match reply(stream, &mut notice, version).await? {
         FrameV2::Ready => (),
-        FrameV2::Error { .. } => return Ok(SendOutcome::Rejected),
+        FrameV2::Error { code } => return Ok(SendOutcome::Rejected(code)),
         _ => return Err("missing READY".into()),
     }
     sending();
@@ -324,7 +334,7 @@ where
     stream.flush().await.map_err(|e| e.to_string())?;
     match reply(stream, &mut notice, version).await? {
         FrameV2::Applied => Ok(SendOutcome::Applied),
-        FrameV2::Error { .. } => Ok(SendOutcome::Rejected),
+        FrameV2::Error { code } => Ok(SendOutcome::Rejected(code)),
         _ => Err("missing APPLIED".into()),
     }
 }

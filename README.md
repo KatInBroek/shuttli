@@ -2,7 +2,7 @@
 
 Peer-to-peer clipboard sync with per-device permissions and verified delivery.
 
-**Preview:** Tailscale discovery, macOS ↔ Linux text and image synchronization, and foreground iOS/Android apps are implemented. LAN discovery, Windows, and file transfer remain later work. Machine-specific configuration, screenshots and run reports are kept outside the repository.
+**Preview:** Tailscale discovery, macOS/Linux/Windows text and image synchronization, native desktop controls, and foreground iOS/Android apps are implemented. LAN discovery and file transfer remain later work. Machine-specific configuration, screenshots and run reports are kept outside the repository.
 
 ## Download
 
@@ -11,12 +11,13 @@ Peer-to-peer clipboard sync with per-device permissions and verified delivery.
 | Platform | Preview package |
 | --- | --- |
 | Ubuntu 24.04+ · Intel/AMD 64-bit | `.deb` installer |
+| Windows 10/11 · Intel/AMD 64-bit | Portable ZIP; open `shuttli-ui.exe` after extraction |
 | Android 10+ · ARM64 / x86_64 | Debug-signed test APK; unsigned release APK/AAB for external signing |
 | iOS 16+ · iPhone / iPad | Unsigned device IPA; sign for your device before installation |
 
-[Ubuntu installation](docs/install/ubuntu.md) · [Android](docs/mobile/android.md) · [iOS signing and installation](docs/mobile/ios.md)
+[Ubuntu installation](docs/install/ubuntu.md) · [Windows installation](docs/install/windows.md) · [Android](docs/mobile/android.md) · [iOS signing and installation](docs/mobile/ios.md)
 
-This is a **preview release**. macOS packages, Windows packages and Linux ARM64
+This is a **preview release**. macOS packages and Linux ARM64
 packages are not yet published. Tailscale must be installed separately.
 
 ## Features
@@ -102,7 +103,7 @@ python3 tools/check_architecture.py
 python3 -m unittest discover -s tools/tests -v
 ```
 
-[Real two-host test driver](tools/integration/two_hosts.py) requires explicit clipboard-overwrite opt-in and uses synthetic content. Platform-independent tests also run on Windows; its actual clipboard/host implementation is not included yet.
+[Real two-host test driver](tools/integration/two_hosts.py) requires explicit clipboard-overwrite opt-in and uses synthetic content. Windows has a native source-build preview; see its [build and acceptance guide](docs/install/windows.md).
 
 ## Roadmap and planned features
 

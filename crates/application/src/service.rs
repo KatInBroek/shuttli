@@ -19,6 +19,7 @@ struct State {
     peers: Vec<PeerInfo>,
     network: Box<dyn Network>,
     last_error: Option<String>,
+    clipboard_read_error: Option<String>,
     available: bool,
     sequence: u64,
     configuration: u64,
@@ -80,6 +81,7 @@ impl Service {
                 peers,
                 network,
                 available,
+                clipboard_read_error: last_error.clone(),
                 last_error,
                 sequence: 0,
                 configuration: 0,
@@ -146,7 +148,15 @@ impl Service {
         }
         match result {
             Ok(v) => {
-                self.state.borrow_mut().available = true;
+                {
+                    let mut state = self.state.borrow_mut();
+                    state.available = true;
+                    if let Some(previous) = state.clipboard_read_error.take() {
+                        if state.last_error.as_ref() == Some(&previous) {
+                            state.last_error = None;
+                        }
+                    }
+                }
                 if let Some(p) = v.payload {
                     let result = self.state.borrow_mut().core.observe_local(v.stamp, &p.meta);
                     match result {
@@ -199,6 +209,7 @@ impl Service {
                 let mut state = self.state.borrow_mut();
                 state.available = false;
                 state.core.baseline(None);
+                state.clipboard_read_error = Some(e.clone());
                 state.last_error = Some(e);
             }
         }

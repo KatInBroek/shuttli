@@ -43,10 +43,13 @@ fn install_gate(gate: &Gate) -> (mpsc::Receiver<()>, mpsc::SyncSender<()>) {
     *gate.lock().unwrap() = Some((entered, wait));
     (ready, release)
 }
-struct Clip(Arc<Mutex<ClipboardValue>>, Gate);
+struct Clip(Arc<Mutex<ClipboardValue>>, Gate, Arc<Mutex<Option<String>>>);
 impl Clipboard for Clip {
     fn read(&mut self) -> Result<ClipboardValue> {
         wait_gate(&self.1);
+        if let Some(error) = self.2.lock().unwrap().clone() {
+            return Err(error);
+        }
         Ok(self.0.lock().unwrap().clone())
     }
     fn write(&mut self, p: &Payload, authorization: WriteAuthorization) -> Result<ClipboardValue> {
@@ -247,10 +250,12 @@ struct Harness {
     fail: Arc<Mutex<bool>>,
     rows: Arc<Mutex<Vec<HistoryEntry>>>,
     notices: mpsc::Receiver<(String, String)>,
+    read_error: Arc<Mutex<Option<String>>>,
 }
 impl Harness {
     fn new() -> Self {
         let clipboard = Arc::new(Mutex::new(value(0)));
+        let read_error = Arc::new(Mutex::new(None));
         let clip_gate = Gate::default();
         let store_gate = Gate::default();
         let network = Arc::new(Mutex::new(NetState::default()));
@@ -273,7 +278,11 @@ impl Harness {
             [1; 16],
             worker(
                 "test-clipboard",
-                Box::new(Clip(clipboard.clone(), clip_gate.clone())) as Box<dyn Clipboard>,
+                Box::new(Clip(
+                    clipboard.clone(),
+                    clip_gate.clone(),
+                    read_error.clone(),
+                )) as Box<dyn Clipboard>,
             )
             .unwrap(),
             worker(
@@ -305,6 +314,7 @@ impl Harness {
             fail,
             rows,
             notices,
+            read_error,
         }
     }
     fn command(&self, action: Action) -> Answer {
@@ -323,6 +333,43 @@ impl Harness {
             _ => panic!(),
         }
     }
+}
+#[test]
+fn healthy_clipboard_clears_its_transient_error_but_preserves_storage_failures() {
+    let h = Harness::new();
+    *h.read_error.lock().unwrap() = Some("clipboard busy".into());
+    block_on(h.app.tick());
+    let Answer::Status { status } = h.command(Action::Status) else {
+        panic!()
+    };
+    assert!(!status.clipboard_available);
+    assert_eq!(status.last_error.as_deref(), Some("clipboard busy"));
+    *h.read_error.lock().unwrap() = None;
+    block_on(h.app.tick());
+    let Answer::Status { status } = h.command(Action::Status) else {
+        panic!()
+    };
+    assert!(status.clipboard_available);
+    assert_eq!(status.last_error, None);
+
+    *h.read_error.lock().unwrap() = Some("clipboard busy".into());
+    block_on(h.app.tick());
+    *h.fail.lock().unwrap() = true;
+    let mut settings = h.settings();
+    settings.notifications = false;
+    assert!(matches!(h.configure(settings), Answer::Error { .. }));
+    *h.read_error.lock().unwrap() = None;
+    block_on(h.app.tick());
+    let Answer::Status { status } = h.command(Action::Status) else {
+        panic!()
+    };
+    assert!(status.clipboard_available);
+    assert!(
+        status
+            .last_error
+            .as_deref()
+            .is_some_and(|error| error.contains("disk full"))
+    );
 }
 #[test]
 fn delivery_notifications_preserve_state_and_direction() {

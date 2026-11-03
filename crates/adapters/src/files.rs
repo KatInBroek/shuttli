@@ -6,6 +6,9 @@ use std::{
 pub fn data_dir() -> Result<PathBuf> {
     let dir = if let Some(p) = std::env::var_os("SHUTTLI_DATA_DIR") {
         PathBuf::from(p)
+    } else if cfg!(windows) {
+        PathBuf::from(std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA unavailable")?)
+            .join("shuttli")
     } else {
         let home = std::env::var_os("HOME").ok_or("HOME unavailable")?;
         if cfg!(target_os = "macos") {
@@ -18,6 +21,17 @@ pub fn data_dir() -> Result<PathBuf> {
         }
     };
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    {
+        let status = crate::windows::command()?
+            .arg("secure-dir")
+            .arg(&dir)
+            .status()
+            .map_err(|e| e.to_string())?;
+        if !status.success() {
+            return Err("could not secure Windows profile directory".into());
+        }
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

@@ -936,8 +936,8 @@ async fn send_pending_v2(s: &Shared, tls: &mut impl Duplex, out: Outbound) -> Re
             DeliveryState::Cancelled,
             "send cancelled before offer".into(),
         ),
-        Ok(shuttli_transport::SendOutcome::Rejected) => {
-            (DeliveryState::Failed, "receiver rejected transfer".into())
+        Ok(shuttli_transport::SendOutcome::Rejected(reason)) => {
+            (DeliveryState::Failed, safe_remote_error(reason))
         }
         Err(error) => (DeliveryState::Unknown, error.clone()),
     };
@@ -1168,9 +1168,9 @@ async fn send_transfer(
     {
         shuttli_transport::SendOutcome::NotOffered => Ok(TransferResult::NotOffered),
         shuttli_transport::SendOutcome::Applied => Ok(TransferResult::Applied),
-        shuttli_transport::SendOutcome::Rejected => Ok(TransferResult::Rejected(
-            safe_remote_error("receiver denied transfer"),
-        )),
+        shuttli_transport::SendOutcome::Rejected(reason) => {
+            Ok(TransferResult::Rejected(safe_remote_error(&reason)))
+        }
     }
 }
 
@@ -1209,8 +1209,8 @@ async fn write_receive_reply(
         let frame = match reply {
             ReceiveReply::Ready => FrameV2::Ready,
             ReceiveReply::Applied => FrameV2::Applied,
-            ReceiveReply::Error(_) => FrameV2::Error {
-                code: "offer_rejected".into(),
+            ReceiveReply::Error(reason) => FrameV2::Error {
+                code: receive_error_code(reason).into(),
             },
         };
         write_v2_frame(tls, &frame).await
@@ -1223,6 +1223,32 @@ async fn write_receive_reply(
             },
         };
         write_frame(tls, &frame).await
+    }
+}
+/// Portable, bounded reasons only. Never send OS paths or arbitrary diagnostics.
+fn receive_error_code(reason: &str) -> &'static str {
+    if reason.contains("Unavailable") {
+        "clipboard_unavailable"
+    } else if reason.contains("Disabled") || reason.contains("permission") {
+        "permission_denied"
+    } else if reason.contains("Stale")
+        || reason.contains("superseded")
+        || reason.contains("changed")
+    {
+        "clipboard_superseded"
+    } else if reason.contains("duplicate") || reason.contains("stale event") {
+        "duplicate_event"
+    } else if reason.contains("busy") || reason.contains("capacity") {
+        "receiver_busy"
+    } else if reason.contains("readback") {
+        "clipboard_verification_failed"
+    } else if reason.contains("invalid content")
+        || reason.contains("PNG")
+        || reason.contains("UTF-")
+    {
+        "invalid_clipboard_content"
+    } else {
+        "offer_rejected"
     }
 }
 async fn receive_transfer(

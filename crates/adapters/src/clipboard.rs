@@ -1,6 +1,8 @@
 //! OS adapter routing. No network or authorization decisions.
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(windows)]
+mod windows;
 #[cfg(target_os = "linux")]
 mod x11;
 use shuttli_ports::sync::{Clipboard, Result};
@@ -13,7 +15,11 @@ pub fn open() -> Result<Box<dyn Clipboard>> {
     {
         Ok(Box::new(macos::MacClipboard::open()?))
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(windows)]
+    {
+        Ok(Box::new(windows::WindowsClipboard::open()?))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         Err("clipboard backend is not implemented on this OS".into())
     }

@@ -20,3 +20,4 @@ shuttli-model.workspace = true
 [dev-dependencies]
 shuttli-adapters.workspace = true
 shuttli-core.workspace = true
+png.workspace = true

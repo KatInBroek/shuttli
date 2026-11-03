@@ -1,10 +1,15 @@
+#[cfg(not(windows))]
 use crate::files::atomic_write;
-use shuttli_model::sync::{AutostartState, AutostartStatus};
+#[cfg(not(windows))]
+use shuttli_model::sync::AutostartState;
+use shuttli_model::sync::AutostartStatus;
 use shuttli_ports::sync::{Platform, Result};
+use std::time::Duration;
+#[cfg(not(windows))]
 use std::{
     path::PathBuf,
     process::{Command, Stdio},
-    time::{Duration, Instant},
+    time::Instant,
 };
 #[derive(Default)]
 pub struct NativePlatform {
@@ -53,6 +58,17 @@ impl Drop for Notifier {
     }
 }
 fn show_notice(title: &str, body: &str) {
+    #[cfg(windows)]
+    {
+        if let Ok(mut command) = crate::windows::command() {
+            let _ = command.args(["notify", title, body]).status();
+        }
+    }
+    #[cfg(not(windows))]
+    show_unix_notice(title, body);
+}
+#[cfg(not(windows))]
+fn show_unix_notice(title: &str, body: &str) {
     let escaped = body
         .replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -89,11 +105,13 @@ fn show_notice(title: &str, body: &str) {
         }
     }
 }
+#[cfg(not(windows))]
 fn home() -> Result<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .ok_or("HOME unavailable".into())
 }
+#[cfg(not(windows))]
 fn xml(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -108,6 +126,30 @@ impl Platform for NativePlatform {
             .send(title.into(), body.into());
     }
     fn autostart(&mut self, enabled: Option<bool>) -> Result<AutostartStatus> {
+        #[cfg(windows)]
+        {
+            let output = crate::windows::command()?
+                .arg("autostart")
+                .arg(std::env::current_exe().map_err(|e| e.to_string())?)
+                .arg(match enabled {
+                    Some(true) => "on",
+                    Some(false) => "off",
+                    None => "status",
+                })
+                .output()
+                .map_err(|e| e.to_string())?;
+            if !output.status.success() {
+                return Err(String::from_utf8_lossy(&output.stderr).trim().into());
+            }
+            serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())
+        }
+        #[cfg(not(windows))]
+        self.unix_autostart(enabled)
+    }
+}
+impl NativePlatform {
+    #[cfg(not(windows))]
+    fn unix_autostart(&mut self, enabled: Option<bool>) -> Result<AutostartStatus> {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         let exe = exe.to_str().ok_or("non-Unicode application path")?;
         if cfg!(target_os = "linux") {
@@ -189,6 +231,7 @@ impl Platform for NativePlatform {
     }
 }
 
+#[cfg(not(windows))]
 fn status(state: AutostartState, message: &str) -> AutostartStatus {
     AutostartStatus {
         state,

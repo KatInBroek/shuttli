@@ -1300,7 +1300,7 @@ async fn send_offer_version<S: AsyncRead + AsyncWrite + Unpin>(
     .await?;
     Ok(match result {
         shuttli_transport::SendOutcome::Applied => (SendState::Applied, true),
-        shuttli_transport::SendOutcome::Rejected => (SendState::Failed, true),
+        shuttli_transport::SendOutcome::Rejected(_) => (SendState::Failed, true),
         shuttli_transport::SendOutcome::NotOffered => (SendState::Failed, false),
     })
 }

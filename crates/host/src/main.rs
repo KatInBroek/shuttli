@@ -1,6 +1,8 @@
 //! Composition root. No synchronization policy lives here.
 #[cfg(unix)]
 mod unix;
+#[cfg(windows)]
+mod windows;
 fn main() -> std::process::ExitCode {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.len() == 1 && matches!(args[0].as_str(), "--version" | "-V" | "version") {
@@ -22,7 +24,17 @@ fn main() -> std::process::ExitCode {
             }
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        match windows::run() {
+            Ok(code) => std::process::ExitCode::from(code),
+            Err(e) => {
+                eprintln!("{}: {e}", shuttli_brand::NAME);
+                std::process::ExitCode::FAILURE
+            }
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         eprintln!(
             "{} daemon: platform host is not implemented on this OS",

@@ -19,6 +19,64 @@ fn metadata(bytes: &[u8]) -> Metadata {
         digest: shuttli_content::canonical_digest(Format::Text, bytes).unwrap(),
     }
 }
+#[test]
+fn legacy_rejection_details_are_utf8_bounded_and_cannot_inject_control_sequences() {
+    let reason = super::bounded_rejection(&format!("\x1b[31m{}\n", "拒绝".repeat(50)));
+    assert!(reason.len() <= 64);
+    assert!(!reason.chars().any(char::is_control));
+    assert!(FrameV2::Error { code: reason }.encode().is_ok());
+}
+
+#[tokio::test]
+async fn rejection_reasons_survive_both_wire_versions_and_both_transfer_stages() {
+    for version in [WireVersion::V1, WireVersion::V2] {
+        for after_ready in [false, true] {
+            let (mut sender, mut receiver) = tokio::io::duplex(4096);
+            let bytes = b"synthetic rejection fixture";
+            let meta = metadata(bytes);
+            let transaction = tokio::spawn(async move {
+                send_live_version(
+                    &mut sender,
+                    LiveOffer {
+                        event: event(),
+                        metadata: &meta,
+                        body: bytes,
+                    },
+                    || true,
+                    |_| Ok(()),
+                    || {},
+                    version,
+                )
+                .await
+            });
+            assert!(matches!(
+                read_live_frame(&mut receiver, version).await.unwrap(),
+                FrameV2::Offer { .. }
+            ));
+            if after_ready {
+                write_live_frame(&mut receiver, &FrameV2::Ready, version)
+                    .await
+                    .unwrap();
+                let mut body = vec![0; bytes.len()];
+                receiver.read_exact(&mut body).await.unwrap();
+                assert_eq!(body, bytes);
+            }
+            write_live_frame(
+                &mut receiver,
+                &FrameV2::Error {
+                    code: "clipboard_unavailable".into(),
+                },
+                version,
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                transaction.await.unwrap().unwrap(),
+                SendOutcome::Rejected("clipboard_unavailable".into())
+            );
+        }
+    }
+}
 
 #[tokio::test]
 async fn both_wire_versions_share_offer_body_receipt_and_rejection() {
@@ -64,7 +122,10 @@ async fn both_wire_versions_share_offer_body_receipt_and_rejection() {
                 )
                 .await
                 .unwrap();
-                assert_eq!(transaction.await.unwrap().unwrap(), SendOutcome::Rejected);
+                assert_eq!(
+                    transaction.await.unwrap().unwrap(),
+                    SendOutcome::Rejected("denied".into())
+                );
                 assert_eq!(stage.load(Ordering::SeqCst), 0);
                 continue;
             }

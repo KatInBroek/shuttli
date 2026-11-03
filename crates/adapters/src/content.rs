@@ -17,9 +17,31 @@ pub fn payload(format: Format, data: Vec<u8>) -> Result<Payload> {
     })
 }
 
+/// An OS clipboard may validly contain an empty string. It has no transferable
+/// body, but still supplies a healthy revision/baseline for incoming writes.
+/// Keep wire payload validation strict, including empty/invalid PNG rejection.
+pub fn capture_payload(format: Format, data: Vec<u8>) -> Result<Option<Payload>> {
+    if format == Format::Text && data.is_empty() {
+        Ok(None)
+    } else {
+        payload(format, data).map(Some)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn empty_os_text_keeps_the_backend_available_without_weakening_wire_validation() {
+        assert!(capture_payload(Format::Text, Vec::new()).unwrap().is_none());
+        assert!(payload(Format::Text, Vec::new()).is_err());
+        assert!(capture_payload(Format::Png, Vec::new()).is_err());
+        assert!(capture_payload(Format::Text, vec![0xff]).is_err());
+        let value = capture_payload(Format::Text, b"new content".to_vec())
+            .unwrap()
+            .unwrap();
+        assert_eq!(value.data.as_ref(), b"new content");
+    }
     #[test]
     fn desktop_payload_uses_shared_canonical_digest() {
         let a = payload(Format::Text, b"a\r\nb\rc".to_vec()).unwrap();

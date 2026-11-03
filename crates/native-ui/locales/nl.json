@@ -159,5 +159,9 @@
   "notice.receiver_confirmed": "Het apparaat heeft de ontvangst bevestigd",
   "notice.cancelled": "Klembordoverdracht geannuleerd",
   "notice.superseded": "Klembordoverdracht vervangen door een nieuwere kopie",
-  "notice.unconfirmed": "Klembordoverdracht niet bevestigd"
+  "notice.unconfirmed": "Klembordoverdracht niet bevestigd",
+  "appearance.label": "Weergave",
+  "appearance.system": "Systeem",
+  "appearance.light": "Licht",
+  "appearance.dark": "Donker"
 }

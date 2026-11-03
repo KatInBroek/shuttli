@@ -159,5 +159,9 @@
   "notice.receiver_confirmed": "Das Gerät hat den Empfang bestätigt",
   "notice.cancelled": "Übertragung der Zwischenablage abgebrochen",
   "notice.superseded": "Übertragung durch eine neuere Kopie ersetzt",
-  "notice.unconfirmed": "Übertragung der Zwischenablage nicht bestätigt"
+  "notice.unconfirmed": "Übertragung der Zwischenablage nicht bestätigt",
+  "appearance.label": "Darstellung",
+  "appearance.system": "System",
+  "appearance.light": "Hell",
+  "appearance.dark": "Dunkel"
 }

@@ -27,7 +27,7 @@ class I18nTests(unittest.TestCase):
                 self.assertTrue(all(name.isidentifier() for name in placeholders(value)))
         # All statically referenced UI keys must exist. Dynamic enums checked below.
         for name in ('shuttli.py','tray_model.py','tray.py'):
-            tree=ast.parse((ROOT/'crates/native-ui/linux'/name).read_text())
+            tree=ast.parse((ROOT/'crates/native-ui/linux'/name).read_text(encoding='utf-8'))
             for node in ast.walk(tree):
                 if isinstance(node,ast.Constant) and isinstance(node.value,str) and '.' in node.value:
                     value=node.value

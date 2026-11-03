@@ -159,5 +159,9 @@
   "notice.receiver_confirmed": "L’appareil a confirmé la réception",
   "notice.cancelled": "Transfert du presse-papiers annulé",
   "notice.superseded": "Transfert remplacé par une copie plus récente",
-  "notice.unconfirmed": "Transfert du presse-papiers non confirmé"
+  "notice.unconfirmed": "Transfert du presse-papiers non confirmé",
+  "appearance.label": "Apparence",
+  "appearance.system": "Système",
+  "appearance.light": "Clair",
+  "appearance.dark": "Sombre"
 }

@@ -22,3 +22,5 @@ pub fn random_epoch() -> shuttli_ports::sync::Result<[u8; 16]> {
 }
 
 mod recent;
+#[cfg(windows)]
+pub mod windows;
