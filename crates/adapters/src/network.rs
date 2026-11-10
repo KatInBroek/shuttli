@@ -308,7 +308,9 @@ async fn selected(
             return Err("session capacity or self connection".into());
         }
         if let Some(old) = sessions.get(&id) {
-            if old.live.load(Ordering::SeqCst) && old.initiator <= initiator {
+            // The initiator tie-break only applies to competing routes in the
+            // same peer process. A restart may leave its old TCP route half-open.
+            if old.epoch == epoch && old.live.load(Ordering::SeqCst) && old.initiator <= initiator {
                 return Err("preferred session already active".into());
             }
             old.live.store(false, Ordering::SeqCst);
@@ -1694,6 +1696,66 @@ mod delivery_tests {
                 .ok()
                 .unwrap();
         }
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn restarted_peer_replaces_half_open_session() {
+        let (shared, mut events, _) = fixture();
+        let id = [2; 32];
+        let info = peer(
+            id,
+            "Synthetic peer".into(),
+            "192.0.2.2:45987".parse().unwrap(),
+        );
+        let capabilities = Capabilities::live();
+        let old_live = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        shared.sessions.lock().await.insert(
+            id,
+            Session {
+                epoch: [1; 16],
+                initiator: id,
+                live: old_live.clone(),
+                peer: info.clone(),
+                capabilities,
+            },
+        );
+        let (mut local, mut remote) = tokio::io::duplex(4096);
+        assert!(
+            selected(
+                &shared,
+                &mut local,
+                info.clone(),
+                id,
+                id,
+                [1; 16],
+                capabilities
+            )
+            .await
+            .is_err()
+        );
+        assert!(old_live.load(Ordering::SeqCst));
+
+        let handshake = async {
+            assert!(matches!(
+                read_frame(&mut remote).await.unwrap(),
+                Frame::Select { initiator } if initiator == id
+            ));
+            write_frame(&mut remote, &Frame::Select { initiator: id })
+                .await
+                .unwrap();
+        };
+        let (new_live, ()) = tokio::join!(
+            selected(&shared, &mut local, info, id, id, [2; 16], capabilities),
+            handshake,
+        );
+        assert!(new_live.unwrap().load(Ordering::SeqCst));
+        assert!(!old_live.load(Ordering::SeqCst));
+        disconnected(&shared, id, &old_live).await;
+        assert!(matches!(events.try_recv(), Ok(NetworkEvent::Peer(p)) if p.online));
+        assert!(events.try_recv().is_err());
+        assert_eq!(
+            shared.sessions.lock().await.get(&id).unwrap().epoch,
+            [2; 16]
+        );
     }
     #[tokio::test(flavor = "current_thread")]
     async fn legacy_hello_retry_is_pinned_to_the_authenticated_identity() {
